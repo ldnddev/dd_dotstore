@@ -14,8 +14,12 @@ cargo run
 
 ## Keybindings
 - Tab: switch tabs
-- A: add dotfile (in List tab)
-- S: create symlinks (in Symlink tab)
+- Up/Down: select item (in List tab)
+- A: add dotfile (prompt name then target)
+- E: edit selected (prompt name then target)
+- R: remove selected
+- S: create symlinks (in Symlink tab, with confirmation)
+- F1: toggle keybindings modal
 - Q: quit
 
 ## Tests

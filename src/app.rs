@@ -13,6 +13,7 @@ pub struct App {
     pub active_tab: ActiveTab,
     pub error: Option<String>,
     pub selected: Option<usize>,
+    pub show_keybindings: bool,
 }
 
 #[derive(PartialEq)]
