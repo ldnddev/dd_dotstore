@@ -1,6 +1,5 @@
 // app.rs
 
-use std::collections::VecDeque;
 use std::path::Path;
 use anyhow::Result;
 use std::os::unix::fs::symlink;
@@ -42,9 +41,11 @@ impl App {
             dotfiles: Vec::new(),
             current_name: String::new(),
             current_target: String::new(),
+            input_mode: InputMode::None,
             active_tab: ActiveTab::List,
             error: None,
             selected: None,
+            show_keybindings: false,
         }
     }
 

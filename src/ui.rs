@@ -2,7 +2,6 @@
 
 use crate::app::{App, ActiveTab};
 use ratatui::{
-    backend::Backend,
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
@@ -47,7 +46,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_keybindings_modal(frame: &mut Frame, app: &App, area: Rect) {
+fn render_keybindings_modal(frame: &mut Frame, _app: &App, area: Rect) {
     let popup = centered_rect(area, 60, 40);
     frame.render_widget(Clear, popup);
 
@@ -100,7 +99,7 @@ fn centered_rect(r: Rect, percent_x: u16, percent_y: u16) -> Rect {
 }
 
 
-fn render_list_tab<B: Backend>(frame: &mut Frame<B>, app: &App, area: ratatui::layout::Rect) {
+fn render_list_tab(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app.dotfiles.iter().enumerate().map(|(i, d)| {
         let line = format!("{} -> {}", d.name, d.target);
         ListItem::new(line).style(if Some(i) == app.selected {
@@ -113,7 +112,7 @@ fn render_list_tab<B: Backend>(frame: &mut Frame<B>, app: &App, area: ratatui::l
     frame.render_widget(list, area);
 }
 
-fn render_symlink_tab<B: Backend>(frame: &mut Frame<B>, app: &App, area: ratatui::layout::Rect) {
+fn render_symlink_tab(frame: &mut Frame, _app: &App, area: Rect) {
     let text = "Press S to create symlinks";
     let paragraph = Paragraph::new(text).block(Block::default().title("Symlink").borders(Borders::ALL));
     frame.render_widget(paragraph, area);

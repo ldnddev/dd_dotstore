@@ -2,7 +2,7 @@
 
 use std::io;
 use crossterm::{
-    event::{self, KeyCode, KeyEvent},
+    event::{self, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -46,7 +46,7 @@ fn main() -> io::Result<()> {
                         app.current_target = app.dotfiles[i].target.clone(); 
                         app.input_mode = InputMode::Name; 
                     },
-                    KeyCode::Char('s') if app.active_tab == ActiveTab::Symlink => { app.create_symlinks("/path/to/repo")?; },
+                    KeyCode::Char('s') if app.active_tab == ActiveTab::Symlink => { if let Err(e) = app.create_symlinks("/path/to/repo") { app.error = Some(e.to_string()); } },
                     _ => {}
                 },
                 InputMode::Name => match key.code {
