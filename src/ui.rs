@@ -4,8 +4,10 @@ use crate::app::{App, ActiveTab};
 use ratatui::{
     backend::Backend,
     Frame,
-    layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::Color,
+    text::Line,
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
 pub fn render(frame: &mut Frame, app: &App) {
