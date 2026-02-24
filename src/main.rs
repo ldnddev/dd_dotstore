@@ -10,7 +10,7 @@ use ratatui::{
     backend::CrosstermBackend,
     Terminal,
 };
-use app::{App, ActiveTab};
+use app::{App, ActiveTab, InputMode};
 use ui::render;
 
 mod app;
