@@ -30,11 +30,46 @@ pub fn render(frame: &mut Frame, app: &App) {
         ActiveTab::Symlink => render_symlink_tab(frame, app, chunks[1]),
     }
 
+    // Render input field if in input mode
+    if app.input_mode != crate::app::InputMode::None {
+        render_input_field(frame, app, main_chunks[0]);
+    }
+
     render_status_bar(frame, app, main_chunks[1]);
 
     if app.show_keybindings {
         render_keybindings_modal(frame, app, main_chunks[0]);
     }
+}
+
+fn render_input_field(frame: &mut Frame, app: &App, area: Rect) {
+    let popup = centered_rect(area, 50, 30);
+    frame.render_widget(Clear, popup);
+
+    let title = match app.input_mode {
+        crate::app::InputMode::Name => "Enter Dotfile Name",
+        crate::app::InputMode::Target => "Enter Target Path (e.g., ~/.config/app)",
+        crate::app::InputMode::None => "",
+    };
+
+    let prompt = if app.input_mode == crate::app::InputMode::Target {
+        format!("Name: {} | Target: {}|", app.current_name, app.current_target)
+    } else {
+        app.current_name.clone()
+    };
+
+    let lines = vec![
+        Line::from(title),
+        Line::from(""),
+        Line::from(format!("Current: {}", if prompt.is_empty() { "[Type here]" } else { &prompt })),
+        Line::from(""),
+        Line::from("Enter to confirm, Esc to cancel"),
+    ];
+
+    let widget = Paragraph::new(lines)
+        .block(Block::default().title("Input").borders(Borders::ALL))
+        .wrap(Wrap::default());
+    frame.render_widget(widget, popup);
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
