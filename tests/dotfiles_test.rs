@@ -5,7 +5,7 @@ use dd_dotstore::actions::{
 use dd_dotstore::app::App;
 use dd_dotstore::inputs::handle_key;
 use dd_dotstore::state::{Action, BrowserState, DirEntry, Modal, NodeKind};
-use dd_dotstore::tree::{build_tree, find_node};
+use dd_dotstore::tree::{build_tree, find_node, flatten_visible};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -46,6 +46,57 @@ fn app_initializes_with_tree_nodes() {
     let app = App::new_with_root(&root).expect("app init");
     assert!(!app.state.tree.is_empty());
     assert!(!app.state.nodes.is_empty());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn source_filter_uses_fuzzy_matching() {
+    let root = temp_path("dd_dotstore_test_source_fuzzy");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("alpha.toml"), "x=1").expect("write alpha");
+    fs::write(root.join("beta.conf"), "y=2").expect("write beta");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    app.state.filter = "btcf".to_string();
+    flatten_visible(&mut app.state);
+
+    assert!(
+        app.state
+            .nodes
+            .iter()
+            .any(|n| n.path == Path::new("beta.conf")),
+        "expected fuzzy filter to match beta.conf",
+    );
+    assert!(
+        !app.state
+            .nodes
+            .iter()
+            .any(|n| n.path == Path::new("alpha.toml")),
+        "expected fuzzy filter to exclude alpha.toml",
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn large_tree_filter_handles_many_entries() {
+    let root = temp_path("dd_dotstore_test_large_tree");
+    fs::create_dir_all(&root).expect("create root");
+    for i in 0..1500 {
+        fs::write(root.join(format!("file_{i:04}.conf")), "x=1").expect("write file");
+    }
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    app.state.filter = "f1499".to_string();
+    flatten_visible(&mut app.state);
+
+    assert!(
+        app.state
+            .nodes
+            .iter()
+            .any(|n| n.path == Path::new("file_1499.conf"))
+    );
 
     let _ = fs::remove_dir_all(root);
 }
@@ -231,6 +282,91 @@ fn modal_import_and_export_picker_key_paths_work() {
 }
 
 #[test]
+fn malformed_import_shows_error_modal_instead_of_failing_key_handler() {
+    let root = temp_path("dd_dotstore_test_bad_import");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".profile"), "export PATH=$PATH").expect("write dotfile");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let bad = root.join("bad_import.json");
+    fs::write(&bad, "{this-is: not-json").expect("write malformed json");
+
+    app.state.modal = Some(Modal::ImportPicker {
+        files: vec![bad],
+        selected: 0,
+    });
+    let handled = handle_key(&mut app.state, key(KeyCode::Enter));
+    assert!(
+        handled.is_ok(),
+        "import parse failure should not bubble as key error"
+    );
+    assert!(matches!(app.state.modal, Some(Modal::Error { .. })));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn esc_closes_common_modals() {
+    let root = temp_path("dd_dotstore_test_modal_esc");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".vimrc"), "set number").expect("write dotfile");
+    let mut app = App::new_with_root(&root).expect("app init");
+    let node_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".vimrc"))
+        .expect("find .vimrc");
+
+    let modals = vec![
+        Modal::Help,
+        Modal::Credits,
+        Modal::Search,
+        Modal::ImportPicker {
+            files: vec![root.join("x.json")],
+            selected: 0,
+        },
+        Modal::ExportPicker {
+            dir: root.clone(),
+            filename: "x".to_string(),
+        },
+        Modal::EditDest {
+            node_idx,
+            browser: BrowserState {
+                root: root.clone(),
+                current: root.clone(),
+                entries: vec![],
+                selected: 0,
+                filter: String::new(),
+            },
+        },
+    ];
+
+    for modal in modals {
+        app.state.modal = Some(modal);
+        let _ = handle_key(&mut app.state, key(KeyCode::Esc)).expect("esc handler");
+        assert!(app.state.modal.is_none(), "Esc should close modal");
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn f2_opens_and_closes_credits_modal() {
+    let root = temp_path("dd_dotstore_test_credits");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".xinitrc"), "exec awesome").expect("write dotfile");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("open credits");
+    assert!(matches!(app.state.modal, Some(Modal::Credits)));
+    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("close credits");
+    assert!(app.state.modal.is_none());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn modal_edit_dest_fuzzy_filter_selects_matching_entry() {
     let root = temp_path("dd_dotstore_test_modal_fuzzy");
     fs::create_dir_all(&root).expect("create root");
@@ -278,6 +414,50 @@ fn modal_edit_dest_fuzzy_filter_selects_matching_entry() {
 }
 
 #[test]
+fn modal_edit_dest_supports_home_and_jump_shortcuts() {
+    let root = temp_path("dd_dotstore_test_modal_shortcuts");
+    fs::create_dir_all(root.join("nested")).expect("create nested");
+    fs::write(root.join(".zshenv"), "export FOO=bar").expect("write dotfile");
+    fs::write(root.join("nested/a"), "a").expect("write a");
+    fs::write(root.join("nested/b"), "b").expect("write b");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let node_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".zshenv"))
+        .expect("find .zshenv");
+
+    let mut browser = BrowserState {
+        root: root.clone(),
+        current: root.join("nested"),
+        entries: vec![],
+        selected: 0,
+        filter: String::new(),
+    };
+    browser.refresh_entries();
+    app.state.modal = Some(Modal::EditDest { node_idx, browser });
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('~'))).expect("home shortcut");
+    if let Some(Modal::EditDest { browser, .. }) = &app.state.modal {
+        assert_eq!(browser.current, root);
+    } else {
+        panic!("expected EditDest modal");
+    }
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('G'))).expect("jump end");
+    if let Some(Modal::EditDest { browser, .. }) = &app.state.modal {
+        let filtered = browser.filtered_indices();
+        assert_eq!(browser.selected, filtered.len().saturating_sub(1));
+    } else {
+        panic!("expected EditDest modal");
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn cannot_change_destination_while_existing_symlink_is_present() {
     let root = temp_path("dd_dotstore_test_dest_lock");
     fs::create_dir_all(&root).expect("create root");
@@ -299,6 +479,54 @@ fn cannot_change_destination_while_existing_symlink_is_present() {
     assert!(matches!(app.state.modal, Some(Modal::Error { .. })));
     assert!(old_dest.exists());
     assert!(!new_dest.exists());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn bulk_create_conflict_requires_overwrite_confirmation() {
+    let root = temp_path("dd_dotstore_test_overwrite_warning");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bash_profile"), "export HISTSIZE=10000").expect("write source");
+    fs::create_dir_all(root.join("home")).expect("create home dir");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let rel = Path::new(".bash_profile");
+    let dest = root.join("home/.bash_profile");
+    fs::write(&dest, "existing real file").expect("write existing destination file");
+
+    assign_destination(&mut app.state, rel, dest.clone()).expect("set destination");
+
+    if let Some(node) = app
+        .state
+        .nodes
+        .iter_mut()
+        .find(|n| matches!(n.kind, NodeKind::File { .. }) && n.path == rel)
+    {
+        node.selected = true;
+    }
+
+    app.state.modal = Some(Modal::ConfirmBulk {
+        action: dd_dotstore::state::BulkAction::Create,
+    });
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("confirm create");
+    assert!(matches!(
+        app.state.modal,
+        Some(Modal::OverwriteWarning { .. })
+    ));
+    assert!(
+        fs::symlink_metadata(&dest)
+            .map(|m| !m.file_type().is_symlink())
+            .unwrap_or(false)
+    );
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("confirm overwrite");
+    assert!(app.state.modal.is_none());
+    assert!(
+        fs::symlink_metadata(&dest)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    );
 
     let _ = fs::remove_dir_all(root);
 }

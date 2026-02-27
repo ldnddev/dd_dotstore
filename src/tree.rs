@@ -63,10 +63,14 @@ pub fn build_tree(root: &Path, ignores: &[String]) -> Vec<Node> {
 
 pub fn flatten_visible(state: &mut AppState) {
     state.nodes.clear();
+    let filter_query: Vec<char> = state
+        .filter
+        .chars()
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
 
-    fn walk(node: &Node, depth: usize, filter: &str, out: &mut Vec<Node>) {
-        let matches =
-            filter.is_empty() || node.name.to_lowercase().contains(&filter.to_lowercase());
+    fn walk(node: &Node, depth: usize, query: &[char], out: &mut Vec<Node>) {
+        let matches = query.is_empty() || fuzzy_match(&node.name, query);
         if matches || matches!(node.kind, NodeKind::Folder { .. }) {
             let mut display = node.clone();
             display.name = format!("{}{}", "  ".repeat(depth), node.name);
@@ -77,13 +81,13 @@ pub fn flatten_visible(state: &mut AppState) {
             && *expanded
         {
             for child in children {
-                walk(child, depth + 1, filter, out);
+                walk(child, depth + 1, query, out);
             }
         }
     }
 
     for node in &state.tree {
-        walk(node, 0, &state.filter, &mut state.nodes);
+        walk(node, 0, &filter_query, &mut state.nodes);
     }
 
     if state.nodes.is_empty() {
@@ -95,6 +99,22 @@ pub fn flatten_visible(state: &mut AppState) {
             .list_state
             .select(Some(state.nodes.len().saturating_sub(1)));
     }
+}
+
+fn fuzzy_match(candidate: &str, query: &[char]) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    let mut idx = 0usize;
+    for ch in candidate.chars().map(|c| c.to_ascii_lowercase()) {
+        if ch == query[idx] {
+            idx += 1;
+            if idx == query.len() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn find_mut_node<'a>(nodes: &'a mut [Node], target: &Path) -> Option<&'a mut Node> {

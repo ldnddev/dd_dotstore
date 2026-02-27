@@ -61,6 +61,7 @@ pub enum Modal {
         selected: usize,
     },
     Help,
+    Credits,
     ImportPicker {
         files: Vec<PathBuf>,
         selected: usize,

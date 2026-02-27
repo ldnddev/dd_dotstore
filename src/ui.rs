@@ -3,7 +3,10 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState,
+    },
 };
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
@@ -43,9 +46,10 @@ fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn draw_status_bar(f: &mut Frame, area: Rect) {
-    let bar = Paragraph::new("F1: Help   /: Search   i: Import   E: Export   Q: Exit")
-        .block(Block::default())
-        .style(ratatui::style::Style::default());
+    let bar =
+        Paragraph::new("F1: Help   F2: Credits   /: Search   i: Import   E: Export   Q: Exit")
+            .block(Block::default())
+            .style(ratatui::style::Style::default());
     f.render_widget(bar, area);
 }
 
@@ -134,6 +138,7 @@ fn draw_status_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
 fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
     let modal_area = centered_rect(70, 60, area);
+    f.render_widget(Clear, modal_area);
 
     if let Some(modal) = &state.modal {
         match modal {
@@ -207,18 +212,12 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
                         let global = start + row;
                         let entry_idx = *filtered.get(global)?;
                         let e = browser.entries.get(entry_idx)?;
-                        let cursor = if global == browser.selected {
-                            "> "
-                        } else {
-                            "  "
-                        };
                         let suffix = if e.is_dir { "/" } else { "" };
-                        let sb = scrollbar_marker(row, total, view_rows, start);
-                        Some(ListItem::new(format!("{cursor}{}{suffix} {sb}", e.name)))
+                        Some(ListItem::new(format!("{}{}", e.name, suffix)))
                     })
                     .collect();
                 let title = format!(
-                    "Edit Destination: {} | filter: {} (type to fuzzy filter, Ctrl+S: use dir, Esc: close)",
+                    "Edit Destination: {} | filter: {} (type to fuzzy filter, g/G/~, Ctrl+S: use dir)",
                     browser.current.display(),
                     if browser.filter.is_empty() {
                         "<none>"
@@ -226,13 +225,32 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
                         &browser.filter
                     }
                 );
-                let list = List::new(items).block(
-                    Block::default()
-                        .title(title)
-                        .borders(Borders::ALL)
-                        .border_style(state.theme.border),
-                );
-                f.render_widget(list, modal_area);
+                let list = List::new(items)
+                    .block(
+                        Block::default()
+                            .title(title)
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.border)
+                            .style(state.theme.normal),
+                    )
+                    .highlight_style(state.theme.selected)
+                    .highlight_symbol("> ");
+
+                let mut list_state = ListState::default();
+                if browser.selected >= start && browser.selected < start.saturating_add(view_rows) {
+                    list_state.select(Some(browser.selected - start));
+                }
+                f.render_stateful_widget(list, modal_area, &mut list_state);
+
+                if total > view_rows && view_rows > 0 {
+                    let mut scrollbar_state = ScrollbarState::new(total)
+                        .position(start)
+                        .viewport_content_length(view_rows);
+                    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                        .begin_symbol(None)
+                        .end_symbol(None);
+                    f.render_stateful_widget(scrollbar, modal_area, &mut scrollbar_state);
+                }
             }
             Modal::IgnoreEditor { .. } => {
                 let text = Paragraph::new("Use j/k and d to edit ignores. Esc to close.").block(
@@ -247,6 +265,7 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
 \n\
 q / Esc      Quit\n\
 F1           Toggle help\n\
+F2           Toggle credits\n\
 j/k or ↑/↓   Navigate\n\
 Space        Expand/collapse folder or toggle file select\n\
 Enter / e    Edit destination (file)\n\
@@ -266,6 +285,22 @@ E            Export picker\n";
                 );
                 f.render_widget(text, modal_area);
             }
+            Modal::Credits => {
+                let credits = "Credits\n\
+\n\
+- Catppuccin: color inspiration\n\
+- GNU Stow: dotfile workflow inspiration\n\
+- Ratatui + Crossterm: TUI stack\n\
+\n\
+Press Esc/F2 to close.";
+                let text = Paragraph::new(credits).block(
+                    Block::default()
+                        .title("Credits")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.border),
+                );
+                f.render_widget(text, modal_area);
+            }
             Modal::ImportPicker { files, selected } => {
                 let items: Vec<ListItem<'_>> = files
                     .iter()
@@ -276,12 +311,21 @@ E            Export picker\n";
                             .file_name()
                             .map(|s| s.to_string_lossy().to_string())
                             .unwrap_or_else(|| p.display().to_string());
-                        ListItem::new(format!("{cursor}{name}"))
+                        let modified = std::fs::metadata(p)
+                            .and_then(|m| m.modified())
+                            .ok()
+                            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        ListItem::new(format!(
+                            "{cursor}{name}  [mtime:{modified}]  {}",
+                            p.display()
+                        ))
                     })
                     .collect();
                 let list = List::new(items).block(
                     Block::default()
-                        .title("Import Picker (j/k, Enter, Esc)")
+                        .title("Import Picker (newest first; j/k, Enter, Esc)")
                         .borders(Borders::ALL)
                         .border_style(state.theme.border),
                 );
@@ -302,27 +346,6 @@ E            Export picker\n";
                 f.render_widget(text, modal_area);
             }
         }
-    }
-}
-
-fn scrollbar_marker(row: usize, total: usize, view_rows: usize, start: usize) -> char {
-    if total <= view_rows || view_rows == 0 {
-        return ' ';
-    }
-
-    let thumb = ((view_rows * view_rows).saturating_add(total - 1) / total).max(1);
-    let max_start = total.saturating_sub(view_rows);
-    let max_track = view_rows.saturating_sub(thumb);
-    let thumb_top = if max_start == 0 {
-        0
-    } else {
-        start * max_track / max_start
-    };
-
-    if row >= thumb_top && row < thumb_top + thumb {
-        '#'
-    } else {
-        '|'
     }
 }
 

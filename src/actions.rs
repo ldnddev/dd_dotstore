@@ -1,6 +1,7 @@
-use crate::state::{Action, AppState, BulkAction, Modal, NodeKind};
+use crate::state::{Action, AppState, BulkAction, Conflict, Modal, NodeKind};
 use crate::tree::{find_mut_node, flatten_visible, set_dest};
 use anyhow::{Context, Result, bail};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,6 +17,15 @@ pub fn push_history(state: &mut AppState, action: Action) {
 }
 
 pub fn create_symlink(state: &mut AppState, rel_src: &Path, dest: &Path) -> Result<bool> {
+    create_symlink_with_overwrite(state, rel_src, dest, false)
+}
+
+fn create_symlink_with_overwrite(
+    state: &mut AppState,
+    rel_src: &Path,
+    dest: &Path,
+    overwrite_real_files: bool,
+) -> Result<bool> {
     #[cfg(not(unix))]
     {
         let _ = state;
@@ -41,6 +51,12 @@ pub fn create_symlink(state: &mut AppState, rel_src: &Path, dest: &Path) -> Resu
             let meta = fs::symlink_metadata(dest)?;
             if meta.file_type().is_symlink() {
                 fs::remove_file(dest)?;
+            } else if overwrite_real_files {
+                if meta.is_dir() {
+                    fs::remove_dir_all(dest)?;
+                } else {
+                    fs::remove_file(dest)?;
+                }
             } else {
                 return Ok(false);
             }
@@ -103,6 +119,14 @@ pub fn remove_symlink(state: &mut AppState, rel_src: &Path) -> Result<bool> {
 }
 
 pub fn confirm_bulk(state: &mut AppState, action: BulkAction) -> Result<()> {
+    confirm_bulk_with_overwrite(state, action, false)
+}
+
+pub fn confirm_bulk_with_overwrite(
+    state: &mut AppState,
+    action: BulkAction,
+    overwrite_real_files: bool,
+) -> Result<()> {
     let selected_paths: Vec<_> = state
         .nodes
         .iter()
@@ -121,7 +145,7 @@ pub fn confirm_bulk(state: &mut AppState, action: BulkAction) -> Result<()> {
                         NodeKind::Folder { .. } => None,
                     })
                     .unwrap_or(fallback);
-                let _ = create_symlink(state, &rel, &dest)?;
+                let _ = create_symlink_with_overwrite(state, &rel, &dest, overwrite_real_files)?;
             }
             BulkAction::Remove => {
                 let _ = remove_symlink(state, &rel)?;
@@ -135,6 +159,39 @@ pub fn confirm_bulk(state: &mut AppState, action: BulkAction) -> Result<()> {
 
     flatten_visible(state);
     Ok(())
+}
+
+pub fn selected_create_conflicts(state: &AppState) -> Vec<Conflict> {
+    let mut conflicts = Vec::new();
+    let mut seen = HashSet::new();
+
+    for node in state
+        .nodes
+        .iter()
+        .filter(|n| n.selected)
+        .filter(|n| matches!(n.kind, NodeKind::File { .. }))
+    {
+        let dest = match &node.kind {
+            NodeKind::File { dest: Some(d) } => d.clone(),
+            NodeKind::File { dest: None } => state.project_root.join(".linked").join(&node.path),
+            NodeKind::Folder { .. } => continue,
+        };
+
+        if seen.contains(&dest) {
+            continue;
+        }
+        if let Ok(meta) = fs::symlink_metadata(&dest)
+            && !meta.file_type().is_symlink()
+        {
+            conflicts.push(Conflict {
+                dest: dest.clone(),
+                is_real_file: true,
+            });
+            seen.insert(dest);
+        }
+    }
+
+    conflicts
 }
 
 pub fn undo_last(state: &mut AppState) -> Result<()> {
@@ -202,13 +259,7 @@ pub fn open_import_picker(state: &mut AppState) -> Result<()> {
         return Ok(());
     };
 
-    let mut candidates: Vec<PathBuf> = read_dir
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
-        .collect();
-
-    candidates.sort();
+    let candidates = sorted_import_candidates(read_dir);
     if candidates.is_empty() {
         state.modal = Some(Modal::Error {
             msg: format!("No export files found in {}", dir.display()),
@@ -221,6 +272,23 @@ pub fn open_import_picker(state: &mut AppState) -> Result<()> {
         selected: 0,
     });
     Ok(())
+}
+
+fn sorted_import_candidates(read_dir: fs::ReadDir) -> Vec<PathBuf> {
+    let mut candidates: Vec<(PathBuf, SystemTime)> = read_dir
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
+        .map(|p| {
+            let modified = fs::metadata(&p)
+                .and_then(|m| m.modified())
+                .unwrap_or(UNIX_EPOCH);
+            (p, modified)
+        })
+        .collect();
+
+    candidates.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    candidates.into_iter().map(|(p, _)| p).collect()
 }
 
 pub fn import_from_path(state: &mut AppState, import_path: &Path) -> Result<()> {
@@ -264,4 +332,38 @@ pub fn export_to_path(state: &mut AppState, export_path: &Path) -> Result<()> {
         msg: format!("Exported current state to {}", export_path.display()),
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sorted_import_candidates;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{}_{}_{}", prefix, std::process::id(), nanos))
+    }
+
+    #[test]
+    fn import_candidates_are_sorted_newest_first() {
+        let root = temp_path("dd_dotstore_actions_sort");
+        fs::create_dir_all(&root).expect("create root");
+        let old = root.join("a.json");
+        let new = root.join("b.json");
+        fs::write(&old, "{}").expect("write old");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        fs::write(&new, "{}").expect("write new");
+
+        let read_dir = fs::read_dir(&root).expect("read dir");
+        let files = sorted_import_candidates(read_dir);
+        assert_eq!(files.first(), Some(&new));
+        assert_eq!(files.get(1), Some(&old));
+
+        let _ = fs::remove_dir_all(root);
+    }
 }

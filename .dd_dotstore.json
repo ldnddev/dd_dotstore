@@ -24,6 +24,18 @@
         "src": "ARCHITECTURE.md",
         "dest": "/home/jlyvers/Downloads/ARCHITECTURE.md"
       }
+    },
+    {
+      "Create": {
+        "src": "ARCHITECTURE.md",
+        "dest": "/home/jlyvers/Documents/ARCHITECTURE.md"
+      }
+    },
+    {
+      "Remove": {
+        "src": "ARCHITECTURE.md",
+        "dest": "/home/jlyvers/Documents/ARCHITECTURE.md"
+      }
     }
   ]
 }

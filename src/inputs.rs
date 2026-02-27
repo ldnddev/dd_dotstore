@@ -2,8 +2,8 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::actions::{
-    assign_destination, confirm_bulk, export_to_path, import_from_path, open_export_picker,
-    open_import_picker, undo_last,
+    assign_destination, confirm_bulk, confirm_bulk_with_overwrite, export_to_path,
+    import_from_path, open_export_picker, open_import_picker, selected_create_conflicts, undo_last,
 };
 use crate::state::{AppState, BrowserState, BulkAction, Modal, NodeKind};
 use crate::tree::{flatten_visible, toggle_expand, toggle_selected};
@@ -17,6 +17,9 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::F(1) => {
             state.modal = Some(Modal::Help);
+        }
+        KeyCode::F(2) => {
+            state.modal = Some(Modal::Credits);
         }
         KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
 
@@ -119,6 +122,16 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     match current_modal {
         Modal::ConfirmBulk { action } => match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                if matches!(action, BulkAction::Create) {
+                    let conflicts = selected_create_conflicts(state);
+                    if !conflicts.is_empty() {
+                        state.modal = Some(Modal::OverwriteWarning {
+                            conflicts,
+                            action_type: action,
+                        });
+                        return Ok(false);
+                    }
+                }
                 confirm_bulk(state, action)?;
                 state.modal = None;
             }
@@ -152,6 +165,24 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                         browser.selected = 0;
                         browser.refresh_entries();
                     }
+                }
+                KeyCode::Char('~') => {
+                    browser.current = browser.root.clone();
+                    browser.selected = 0;
+                    browser.refresh_entries();
+                }
+                KeyCode::Char('g') if key.modifiers.is_empty() && browser.filter.is_empty() => {
+                    browser.selected = 0;
+                }
+                KeyCode::Char('G') if key.modifiers.is_empty() && browser.filter.is_empty() => {
+                    browser.selected = filtered.len().saturating_sub(1);
+                }
+                KeyCode::PageUp => {
+                    browser.selected = browser.selected.saturating_sub(10);
+                }
+                KeyCode::PageDown => {
+                    browser.selected =
+                        (browser.selected + 10).min(filtered.len().saturating_sub(1));
                 }
                 KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                     if let Some(entry_idx) = filtered.get(browser.selected)
@@ -240,11 +271,25 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             state.modal = Some(Modal::IgnoreEditor { selected });
         }
 
-        Modal::Error { .. } | Modal::OverwriteWarning { .. } => {
+        Modal::OverwriteWarning { action_type, .. } => match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                confirm_bulk_with_overwrite(state, action_type, true)?;
+                state.modal = None;
+            }
+            _ => state.modal = None,
+        },
+
+        Modal::Error { .. } => {
             state.modal = None;
         }
         Modal::Help => match key.code {
             KeyCode::Esc | KeyCode::Enter | KeyCode::F(1) | KeyCode::Char('q') => {
+                state.modal = None;
+            }
+            _ => {}
+        },
+        Modal::Credits => match key.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::F(2) | KeyCode::Char('q') => {
                 state.modal = None;
             }
             _ => {}
@@ -261,7 +306,11 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 }
                 KeyCode::Enter => {
                     if let Some(path) = files.get(selected) {
-                        import_from_path(state, path)?;
+                        if let Err(err) = import_from_path(state, path) {
+                            state.modal = Some(Modal::Error {
+                                msg: format!("Import failed: {err}"),
+                            });
+                        }
                     } else {
                         state.modal = None;
                     }
