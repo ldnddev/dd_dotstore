@@ -61,6 +61,25 @@ cargo build --release
 ./target/release/dd_dotstore
 ```
 
+## Install
+
+```bash
+# Build release binary
+cargo build --release
+
+# Install to ~/.local/bin/dd_dotstore
+mkdir -p "$HOME/.local/bin"
+cp target/release/dd_dotstore "$HOME/.local/bin/dd_dotstore"
+chmod +x "$HOME/.local/bin/dd_dotstore"
+
+# Ensure ~/.local/bin is on PATH (bash)
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify
+dd_dotstore --help
+```
+
 ## Test
 ```bash
 cargo test
