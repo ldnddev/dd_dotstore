@@ -1,34 +1,117 @@
 # dd_dotstore Architecture
 
-## Overview
+TUI application for managing Linux dotfiles symlinks using Rust + ratatui.
 
-dd_dotstore is a simple TUI app for managing dotfiles, built with Rust and Ratatui. It allows users to maintain a list of dotfiles, add/remove/edit them, backup to tar.gz, and restore from backups.
+## Goals
+- Select project folder (default = current dir)
+- Show directory tree of dotfiles on left panel
+- Assign symlink destinations via modal browser
+- Multi-select items → create/remove symlinks in bulk
+- Persist configuration (.dd_dotstore.json)
+- Undo (last 10 actions, persisted)
+- Filter/search, ignore patterns, import/export
+- Catppuccin theme, vim-style keys, status icons
 
-## Modules
+## Project Structure
+src/
+├── main.rs
+├── app.rs          # minimal App struct + new() + run loop glue
+├── state.rs        # App state, Node, Modal, Theme, PersistentData
+├── tree.rs         # tree building, flatten, find, expand/collapse
+├── actions.rs      # create_symlink, remove_symlink, undo, bulk, import/export
+├── ui.rs           # full draw/ui function + modal rendering
+├── input.rs        # handle_key + sub-handlers (navigation, modal keys, etc.)
+└── utils.rs        # small helpers (status_icon, should_ignore, etc.)
 
-- **main.rs**: Entry point, terminal setup, event loop, key handling.
-- **app.rs**: App state (dotfiles list, current tab, inputs, errors).
-- **ui.rs**: Rendering for tabs (List, Backup, Restore), lists, inputs, popups.
-- **dotfiles.rs**: Logic for listing, adding, backing up (tar.gz), restoring dotfiles.
+## Layout (chosen)
+Classic horizontal split
++---------------------------+---------------------------------+
+| Source Panel              | Status Panel                    |
+|                           |                                 |
+| > nvim     ✓  ~/.config/  | Created symlinks:               |
+|   init.lua                | • nvim     → ~/.config/nvim     |
+|   lua/                    | • .bashrc  → ~/.bashrc          |
+| > sway     ✗              | • zsh      → ~/.zshrc           |
+|   config                  |                                 |
+| .bashrc    ✓              |                                 |
+| [filtered: 42/128 items]  |                                 |
++---------------------------+---------------------------------+
+| [centered modal / confirm / error popup when active]        |
++-------------------------------------------------------------+
 
-## Key Flows
 
-1. **Dotfiles List**: Display, add, remove, edit paths.
-2. **Backup**: Select files from list, create tar.gz in ~/backups or specified path.
-3. **Restore**: Select tar.gz, extract to home directory (with confirmation).
-4. **Event Loop**: Handles keys for navigation, actions, confirmations.
+## Core Components
 
-## New Features
+- **App** struct
+  - project_root: PathBuf
+  - config_path: .dd_dotstore.json
+  - tree: Vec<Node> (hierarchical)
+  - nodes: Vec<Node> (flattened visible)
+  - list_state, status_list_state
+  - filter: String
+  - modal: Option<Modal>
+  - history: VecDeque<Action> (max 10)
+  - ignore_patterns: Vec<String>
+  - theme: Theme (Catppuccin)
 
-- **Dotfiles Management Tab**: List view with add/remove/edit (including custom targets like ~/.config or ~).
-- **Symlink Management**: Create soft links from repo to custom home paths for flexible placement (e.g., ~/.config/app or ~/.app).
+- **Node**
+  - name, path (relative), kind (File/Folder), selected, symlink_status
 
-## Definition of Done
+- **NodeKind**
+  - File { dest: Option<PathBuf> }
+  - Folder { children: Vec<Node>, expanded: bool }
 
-- TUI with tabs for list/backup/restore.
-- Logic for dotfile operations.
-- Keybindings and rendering.
-- Tests for core functions.
-- README updates.
+- **SymlinkStatus**: None | Valid | Broken | Unknown
+
+- **Action**: Create { src, dest } | Remove { src }
+
+- **Modal** variants
+  - EditDest { node_idx, browser }
+  - ConfirmBulk { action: BulkAction }
+  - Error { msg }
+  - Search
+  - IgnoreEditor { selected }
+
+- **BrowserState** (destination picker)
+  - current path, entries, selected
+
+## Key Bindings (main)
+
+- q / Esc          → quit
+- j/k ↑↓           → navigate
+- space            → expand/collapse folder or toggle select file
+- Enter / e        → edit destination (file only)
+- s                → bulk create (confirm)
+- x                → bulk remove (confirm)
+- u                → undo last action
+- /                → open filter
+- r                → reload tree
+- I                → open ignore patterns editor
+- i / e            → import / export config
+
+## Persistence
+- .dd_dotstore.json in project root
+- symlinks: rel_src → abs_dest
+- history: last 10 actions
+- saved on exit + after changes
+
+## Features
+- Default ignores: .git, node_modules, target, __pycache__, .dd_dotstore.json, .DS_Store
+- Fuzzy filter on source panel
+- Status icons: ✓ (valid/green), ✗ (broken/red), ? (unknown/yellow)
+- Confirm before bulk create/remove
+- Overwrite warning (basic)
+- Import/export JSON configs (~/.dd_dotstore/exports/)
+- Session-persisted undo (max 10)
+
+## Dependencies
+- ratatui
+- crossterm
+- anyhow
+- serde + serde_json
+- walkdir
+- dirs
+- chrono (optional for export timestamp)
+
 
 For contributions, see README.md.

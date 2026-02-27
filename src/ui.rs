@@ -1,119 +1,332 @@
-// ui.rs
-
-use crate::app::{App, ActiveTab};
+use crate::state::{AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
-    text::Line,
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    layout::{Constraint, Direction, Layout, Rect},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
-pub fn render(frame: &mut Frame, app: &App) {
-    let main_chunks = Layout::default()
+pub fn draw(f: &mut Frame, state: &mut AppState) {
+    let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(90), Constraint::Length(1)])
-        .split(frame.area());
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(f.area());
+
+    draw_header(f, state, outer[0]);
 
     let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(main_chunks[0]);
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .split(outer[1]);
 
-    let tabs = ratatui::widgets::Tabs::new(vec!["List", "Symlink"])
-        .select(if app.active_tab == ActiveTab::List { 0 } else { 1 })
-        .block(Block::default().borders(Borders::BOTTOM));
-    frame.render_widget(tabs, chunks[0]);
+    draw_source_panel(f, state, chunks[0]);
+    draw_status_panel(f, state, chunks[1]);
+    draw_status_bar(f, outer[2]);
 
-    match app.active_tab {
-        ActiveTab::List => render_list_tab(frame, app, chunks[1]),
-        ActiveTab::Symlink => render_symlink_tab(frame, app, chunks[1]),
-    }
-
-    // Render input field if in input mode
-    if app.input_mode != crate::app::InputMode::None {
-        render_input_field(frame, app, main_chunks[0]);
-    }
-
-    render_status_bar(frame, app, main_chunks[1]);
-
-    if app.show_keybindings {
-        render_keybindings_modal(frame, app, main_chunks[0]);
+    if state.modal.is_some() {
+        draw_modal(f, state, f.area());
     }
 }
 
-fn render_input_field(frame: &mut Frame, app: &App, area: Rect) {
-    let popup = centered_rect(area, 50, 30);
-    frame.render_widget(Clear, popup);
+fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
+    let header = Paragraph::new(state.header_copy.as_str()).block(
+        Block::default()
+            .title("dd_dotstore")
+            .borders(Borders::ALL)
+            .border_style(state.theme.border),
+    );
+    f.render_widget(header, area);
+}
 
-    let title = match app.input_mode {
-        crate::app::InputMode::Name => "Enter Dotfile Name",
-        crate::app::InputMode::Target => "Enter Target Path (e.g., ~/.config/app)",
-        crate::app::InputMode::None => "",
-    };
+fn draw_status_bar(f: &mut Frame, area: Rect) {
+    let bar = Paragraph::new("F1: Help   /: Search   i: Import   E: Export   Q: Exit")
+        .block(Block::default())
+        .style(ratatui::style::Style::default());
+    f.render_widget(bar, area);
+}
 
-    let prompt = if app.input_mode == crate::app::InputMode::Target {
-        format!("Name: {} | Target: {}|", app.current_name, app.current_target)
+fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
+    let items: Vec<ListItem<'_>> = state
+        .nodes
+        .iter()
+        .map(|node| {
+            let (icon, icon_style) = match node.symlink_status {
+                SymlinkStatus::Valid => ("✓ ", state.theme.valid),
+                SymlinkStatus::Broken => ("✗ ", state.theme.broken),
+                SymlinkStatus::Unknown => ("? ", state.theme.highlight),
+                SymlinkStatus::None => ("  ", state.theme.normal),
+            };
+
+            let prefix = if node.selected { "[✓] " } else { "[ ] " };
+
+            let name = match &node.kind {
+                NodeKind::Folder { expanded, .. } => {
+                    if *expanded {
+                        format!("> {}", node.name)
+                    } else {
+                        format!("+ {}", node.name)
+                    }
+                }
+                _ => node.name.clone(),
+            };
+
+            let content = Line::from(vec![
+                Span::styled(prefix, state.theme.normal),
+                Span::styled(icon, icon_style),
+                Span::raw(name),
+            ]);
+
+            ListItem::new(content)
+        })
+        .collect();
+
+    let title = if state.filter.is_empty() {
+        "Source".to_string()
     } else {
-        app.current_name.clone()
+        format!("Source (filter: {})", state.filter)
     };
 
-    let lines = vec![
-        Line::from(title),
-        Line::from(""),
-        Line::from(format!("Current: {}", if prompt.is_empty() { "[Type here]" } else { &prompt })),
-        Line::from(""),
-        Line::from("Enter to confirm, Esc to cancel"),
-    ];
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(state.theme.border),
+        )
+        .highlight_style(state.theme.selected);
 
-    let widget = Paragraph::new(lines)
-        .block(Block::default().title("Input").borders(Borders::ALL))
-        .wrap(Wrap::default());
-    frame.render_widget(widget, popup);
+    f.render_stateful_widget(list, area, &mut state.list_state);
 }
 
-fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let text = match app.active_tab {
-        ActiveTab::List => "A: Add | E: Edit | R: Remove | Tab: Switch | F1: Help | Q: Quit",
-        ActiveTab::Symlink => "S: Create Symlinks | Tab: Switch | F1: Help | Q: Quit",
+fn draw_status_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
+    let mut lines = vec![];
+
+    fn collect_symlinks(node: &Node, out: &mut Vec<String>) {
+        if let NodeKind::File { dest: Some(d) } = &node.kind {
+            out.push(format!("• {} -> {}", node.path.display(), d.display()));
+        }
+        if let NodeKind::Folder { children, .. } = &node.kind {
+            for c in children {
+                collect_symlinks(c, out);
+            }
+        }
+    }
+
+    for node in &state.tree {
+        collect_symlinks(node, &mut lines);
+    }
+
+    let items: Vec<ListItem<'_>> = lines.into_iter().map(ListItem::new).collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .title("Symlinks")
+            .borders(Borders::ALL)
+            .border_style(state.theme.border),
+    );
+
+    f.render_stateful_widget(list, area, &mut state.status_list_state);
+}
+
+fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
+    let modal_area = centered_rect(70, 60, area);
+
+    if let Some(modal) = &state.modal {
+        match modal {
+            Modal::ConfirmBulk { action } => {
+                let title = match action {
+                    BulkAction::Create => "Create symlinks?",
+                    BulkAction::Remove => "Remove symlinks?",
+                };
+                let text = Paragraph::new(
+                    "Confirm action for selected items?\nY = yes, any other key = cancel",
+                )
+                .block(
+                    Block::default()
+                        .title(title)
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.border),
+                );
+                f.render_widget(text, modal_area);
+            }
+            Modal::OverwriteWarning { conflicts, .. } => {
+                let real_count = conflicts.iter().filter(|c| c.is_real_file).count();
+                let symlink_count = conflicts.len() - real_count;
+                let mut names = String::new();
+                for conflict in conflicts.iter().take(4) {
+                    if !names.is_empty() {
+                        names.push('\n');
+                    }
+                    names.push_str(&conflict.dest.display().to_string());
+                }
+                let msg = format!(
+                    "{} conflicts: {} real files, {} symlinks.\n{}",
+                    conflicts.len(),
+                    real_count,
+                    symlink_count,
+                    names
+                );
+                let text = Paragraph::new(msg).block(
+                    Block::default()
+                        .title("Overwrite Warning")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.error),
+                );
+                f.render_widget(text, modal_area);
+            }
+            Modal::Error { msg } => {
+                let text = Paragraph::new(msg.as_str()).block(
+                    Block::default()
+                        .title("Notice")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.error),
+                );
+                f.render_widget(text, modal_area);
+            }
+            Modal::Search => {
+                let text = Paragraph::new(format!("Filter: {}", state.filter))
+                    .block(Block::default().title("Search").borders(Borders::ALL));
+                f.render_widget(text, modal_area);
+            }
+            Modal::EditDest { browser, .. } => {
+                let filtered = browser.filtered_indices();
+                let total = filtered.len();
+                let view_rows = modal_area.height.saturating_sub(2) as usize;
+                let start = if total > view_rows && browser.selected >= view_rows {
+                    browser.selected + 1 - view_rows
+                } else {
+                    0
+                };
+
+                let items: Vec<ListItem<'_>> = (0..view_rows)
+                    .filter_map(|row| {
+                        let global = start + row;
+                        let entry_idx = *filtered.get(global)?;
+                        let e = browser.entries.get(entry_idx)?;
+                        let cursor = if global == browser.selected {
+                            "> "
+                        } else {
+                            "  "
+                        };
+                        let suffix = if e.is_dir { "/" } else { "" };
+                        let sb = scrollbar_marker(row, total, view_rows, start);
+                        Some(ListItem::new(format!("{cursor}{}{suffix} {sb}", e.name)))
+                    })
+                    .collect();
+                let title = format!(
+                    "Edit Destination: {} | filter: {} (type to fuzzy filter, Ctrl+S: use dir, Esc: close)",
+                    browser.current.display(),
+                    if browser.filter.is_empty() {
+                        "<none>"
+                    } else {
+                        &browser.filter
+                    }
+                );
+                let list = List::new(items).block(
+                    Block::default()
+                        .title(title)
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.border),
+                );
+                f.render_widget(list, modal_area);
+            }
+            Modal::IgnoreEditor { .. } => {
+                let text = Paragraph::new("Use j/k and d to edit ignores. Esc to close.").block(
+                    Block::default()
+                        .title("Ignore Editor")
+                        .borders(Borders::ALL),
+                );
+                f.render_widget(text, modal_area);
+            }
+            Modal::Help => {
+                let help = "Keybindings\n\
+\n\
+q / Esc      Quit\n\
+F1           Toggle help\n\
+j/k or ↑/↓   Navigate\n\
+Space        Expand/collapse folder or toggle file select\n\
+Enter / e    Edit destination (file)\n\
+s            Bulk create selected symlinks\n\
+x            Bulk remove selected symlinks\n\
+u            Undo last action\n\
+/            Search/filter\n\
+r            Reload tree\n\
+I            Ignore editor\n\
+i            Import picker\n\
+E            Export picker\n";
+                let text = Paragraph::new(help).block(
+                    Block::default()
+                        .title("Help")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.border),
+                );
+                f.render_widget(text, modal_area);
+            }
+            Modal::ImportPicker { files, selected } => {
+                let items: Vec<ListItem<'_>> = files
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let cursor = if i == *selected { "> " } else { "  " };
+                        let name = p
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| p.display().to_string());
+                        ListItem::new(format!("{cursor}{name}"))
+                    })
+                    .collect();
+                let list = List::new(items).block(
+                    Block::default()
+                        .title("Import Picker (j/k, Enter, Esc)")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.border),
+                );
+                f.render_widget(list, modal_area);
+            }
+            Modal::ExportPicker { dir, filename } => {
+                let text = Paragraph::new(format!(
+                    "Directory: {}\nFilename: {}\n\nType to edit, Enter to export, Esc to cancel.",
+                    dir.display(),
+                    filename
+                ))
+                .block(
+                    Block::default()
+                        .title("Export Picker")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.border),
+                );
+                f.render_widget(text, modal_area);
+            }
+        }
+    }
+}
+
+fn scrollbar_marker(row: usize, total: usize, view_rows: usize, start: usize) -> char {
+    if total <= view_rows || view_rows == 0 {
+        return ' ';
+    }
+
+    let thumb = ((view_rows * view_rows).saturating_add(total - 1) / total).max(1);
+    let max_start = total.saturating_sub(view_rows);
+    let max_track = view_rows.saturating_sub(thumb);
+    let thumb_top = if max_start == 0 {
+        0
+    } else {
+        start * max_track / max_start
     };
-    let paragraph = Paragraph::new(text).alignment(Alignment::Center);
-    frame.render_widget(paragraph, area);
+
+    if row >= thumb_top && row < thumb_top + thumb {
+        '#'
+    } else {
+        '|'
+    }
 }
 
-fn render_keybindings_modal(frame: &mut Frame, _app: &App, area: Rect) {
-    let popup = centered_rect(area, 60, 40);
-    frame.render_widget(Clear, popup);
-
-    let lines = vec![
-        Line::from("Keybindings"),
-        Line::from(""),
-        Line::from("Global:"),
-        Line::from("Tab: Switch tabs"),
-        Line::from("F1: Toggle this help modal"),
-        Line::from("Q: Quit"),
-        Line::from(""),
-        Line::from("List Tab:"),
-        Line::from("Up/Down: Select item"),
-        Line::from("A: Add new dotfile (prompt name then target)"),
-        Line::from("E: Edit selected (prompt name then target)"),
-        Line::from("R: Remove selected"),
-        Line::from(""),
-        Line::from("Symlink Tab:"),
-        Line::from("S: Create symlinks (prompt repo path, confirm)"),
-        Line::from(""),
-        Line::from("Input Mode (when prompting):"),
-        Line::from("Enter: Confirm/Next field"),
-        Line::from("Esc: Cancel"),
-    ];
-
-    let paragraph = Paragraph::new(lines)
-        .block(Block::default().title("Help (F1 to close)").borders(Borders::ALL))
-        .wrap(Wrap::default());
-    frame.render_widget(paragraph, popup);
-}
-
-fn centered_rect(r: Rect, percent_x: u16, percent_y: u16) -> Rect {
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -131,24 +344,4 @@ fn centered_rect(r: Rect, percent_x: u16, percent_y: u16) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
-}
-
-
-fn render_list_tab(frame: &mut Frame, app: &App, area: Rect) {
-    let items: Vec<ListItem> = app.dotfiles.iter().enumerate().map(|(i, d)| {
-        let line = format!("{} -> {}", d.name, d.target);
-        ListItem::new(line).style(if Some(i) == app.selected {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-        })
-    }).collect();
-    let list = List::new(items).block(Block::default().title("Dotfiles").borders(Borders::ALL));
-    frame.render_widget(list, area);
-}
-
-fn render_symlink_tab(frame: &mut Frame, _app: &App, area: Rect) {
-    let text = "Press S to create symlinks";
-    let paragraph = Paragraph::new(text).block(Block::default().title("Symlink").borders(Borders::ALL));
-    frame.render_widget(paragraph, area);
 }

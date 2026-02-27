@@ -1,27 +1,69 @@
 # dd_dotstore
 
-Simple TUI app to manage dotfiles using symlinks for easy sharing and updates across machines.
+TUI tool to manage Linux dotfiles: select project folder, assign symlink destinations, create/remove symlinks in bulk, persist config.
 
 ## Features
-- List, add, remove, edit dotfile paths with custom targets (e.g., ~/.config or ~)
-- Create symlinks from repo to custom home locations for flexible placement
-- No compression - direct linking for live updates and multi-machine sharing
 
-## Run
-```bash
-cargo run
-```
+- Auto-detect current dir as project root
+- Tree view of dotfiles (expand/collapse)
+- Assign symlink destinations via filesystem browser (~ by default)
+- Multi-select files/folders → bulk create/remove symlinks
+- Undo last 10 actions (persisted)
+- Fuzzy filter on source panel
+- Ignore patterns (editable)
+- Catppuccin theme
+- Symlink status icons (✓ valid, ✗ broken)
+- Import/export configs
+- Confirm dialogs + overwrite warnings
 
 ## Keybindings
-- Tab: switch tabs
-- Up/Down: select item (in List tab)
-- A: add dotfile (prompt name then target)
-- E: edit selected (prompt name then target)
-- R: remove selected
-- S: create symlinks (in Symlink tab, with confirmation)
-- F1: toggle keybindings modal
-- Q: quit
+**Main keys**
+q / Esc         Quit
+j / k / ↑ / ↓   Navigate list
+Space           Expand/collapse folder OR toggle file selection
+Enter / e       Edit destination (file only)
+s               Bulk create symlinks (confirm)
+x               Bulk remove symlinks (confirm)
+u               Undo last action
+/               Open filter
+r               Reload tree
+I               Edit ignore patterns
+i / e           Import / Export config
 
-## Tests
-Run `cargo test` for unit tests on dotfile management.
 
+**Modal keys (when popup open):**
+- Arrow / jk    Navigate
+- Enter         Confirm / select path
+- Esc           Cancel / close
+- y             Confirm bulk action
+- Delete / d    Remove ignore pattern (in editor)
+
+## Run
+
+```bash
+# Development
+cargo run
+
+# Release build
+cargo build --release
+./target/release/dd_dotstore
+```
+
+## Test
+```bash
+cargo test
+# or run specific tests
+cargo test tree::build_tree
+```
+
+## License
+MIT License
+(small personal tool, permissive, widely compatible)
+
+## Other Mentions
+Config saved as .dd_dotstore.json in project root
+Undo history capped at 10, persisted
+Ignores common dirs/files by default (.git, node_modules, target, etc.)
+Requires Rust 1.70+ and unix-like OS (symlinks)
+
+**Enjoy managing your dotfiles.**
