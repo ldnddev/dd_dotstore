@@ -36,6 +36,18 @@
         "src": "ARCHITECTURE.md",
         "dest": "/home/jlyvers/Documents/ARCHITECTURE.md"
       }
+    },
+    {
+      "Create": {
+        "src": "ARCHITECTURE.md",
+        "dest": "/home/jlyvers/Documents/ARCHITECTURE.md"
+      }
+    },
+    {
+      "Remove": {
+        "src": "ARCHITECTURE.md",
+        "dest": "/home/jlyvers/Documents/ARCHITECTURE.md"
+      }
     }
   ]
 }

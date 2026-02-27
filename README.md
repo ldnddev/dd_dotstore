@@ -5,20 +5,24 @@ TUI tool to manage Linux dotfiles: select project folder, assign symlink destina
 ## Features
 
 - Auto-detect current dir as project root
+- Optional project root override via CLI (`--root <path>` or positional path)
 - Tree view of dotfiles (expand/collapse)
-- Assign symlink destinations via filesystem browser (~ by default)
+- Assign symlink destinations via filesystem browser (`~`, `g/G`, fuzzy filter)
 - Multi-select files/folders → bulk create/remove symlinks
 - Undo last 10 actions (persisted)
 - Fuzzy filter on source panel
 - Ignore patterns (editable)
 - Catppuccin theme
 - Symlink status icons (✓ valid, ✗ broken)
-- Import/export configs
+- Import/export configs (`~/.dd_dotstore/exports/`, newest-first import list)
 - Confirm dialogs + overwrite warnings
+- Help (`F1`) and credits (`F2`) modals
 
 ## Keybindings
 **Main keys**
 q / Esc         Quit
+F1              Help modal
+F2              Credits modal
 j / k / ↑ / ↓   Navigate list
 Space           Expand/collapse folder OR toggle file selection
 Enter / e       Edit destination (file only)
@@ -28,7 +32,7 @@ u               Undo last action
 /               Open filter
 r               Reload tree
 I               Edit ignore patterns
-i / e           Import / Export config
+i / E           Import / Export config
 
 
 **Modal keys (when popup open):**
@@ -37,12 +41,20 @@ i / e           Import / Export config
 - Esc           Cancel / close
 - y             Confirm bulk action
 - Delete / d    Remove ignore pattern (in editor)
+- Destination browser: type for fuzzy filter, `Ctrl+U` clear, `~` home, `g/G` jump, `PgUp/PgDn` scroll, `Ctrl+S` select current dir
 
 ## Run
 
 ```bash
 # Development
 cargo run
+
+# Development with explicit project root
+cargo run -- --root /path/to/dotfiles
+cargo run -- /path/to/dotfiles
+
+# CLI help
+cargo run -- --help
 
 # Release build
 cargo build --release
