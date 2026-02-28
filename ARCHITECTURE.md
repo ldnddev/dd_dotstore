@@ -79,15 +79,17 @@ Classic horizontal split
 
 - q / Esc          → quit
 - j/k ↑↓           → navigate
-- space            → expand/collapse folder or toggle select file
-- Enter / e        → edit destination (file only)
+- space            → toggle select file/folder
+- enter            → edit destination (file/folder)
+- h/l or ←/→       → collapse/expand folder
+- e                → edit destination (file/folder)
 - s                → bulk create (confirm)
 - x                → bulk remove (confirm)
 - u                → undo last action
 - /                → open filter
 - r                → reload tree
 - I                → open ignore patterns editor
-- i / e            → import / export config
+- i / E            → import / export config
 
 ## Persistence
 - .dd_dotstore.json in project root

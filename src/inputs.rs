@@ -32,8 +32,11 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             state.list_state.select(Some(0));
         }
 
-        KeyCode::Char(' ') => toggle_expand_or_select(state),
-        KeyCode::Enter | KeyCode::Char('e') => open_dest_browser(state),
+        KeyCode::Char(' ') => toggle_selection(state),
+        KeyCode::Enter => activate_selected(state),
+        KeyCode::Char('e') => open_dest_browser(state),
+        KeyCode::Right | KeyCode::Char('l') => set_folder_expanded(state, true),
+        KeyCode::Left | KeyCode::Char('h') => set_folder_expanded(state, false),
 
         KeyCode::Char('s') if state.has_selected() => {
             state.modal = Some(Modal::ConfirmBulk {
@@ -80,7 +83,7 @@ fn move_selection(state: &mut AppState, delta: isize) {
     state.list_state.select(Some(next as usize));
 }
 
-fn toggle_expand_or_select(state: &mut AppState) {
+fn toggle_selection(state: &mut AppState) {
     let Some(idx) = state.list_state.selected() else {
         return;
     };
@@ -89,10 +92,7 @@ fn toggle_expand_or_select(state: &mut AppState) {
     }
 
     let selected = state.nodes[idx].clone();
-    match selected.kind {
-        NodeKind::Folder { .. } => toggle_expand(state, &selected.path),
-        NodeKind::File { .. } => toggle_selected(state, &selected.path),
-    }
+    toggle_selected(state, &selected.path);
 
     flatten_visible(state);
     state
@@ -100,10 +100,33 @@ fn toggle_expand_or_select(state: &mut AppState) {
         .select(Some(idx.min(state.nodes.len().saturating_sub(1))));
 }
 
+fn activate_selected(state: &mut AppState) {
+    open_dest_browser(state);
+}
+
+fn set_folder_expanded(state: &mut AppState, expand: bool) {
+    let Some(idx) = state.list_state.selected() else {
+        return;
+    };
+    if idx >= state.nodes.len() {
+        return;
+    }
+
+    let selected = state.nodes[idx].clone();
+    if let NodeKind::Folder { expanded, .. } = selected.kind
+        && expanded != expand
+    {
+        toggle_expand(state, &selected.path);
+        flatten_visible(state);
+        state
+            .list_state
+            .select(Some(idx.min(state.nodes.len().saturating_sub(1))));
+    }
+}
+
 fn open_dest_browser(state: &mut AppState) {
     if let Some(idx) = state.list_state.selected()
         && idx < state.nodes.len()
-        && matches!(state.nodes[idx].kind, NodeKind::File { .. })
     {
         let mut browser = BrowserState::new();
         browser.refresh_entries();
@@ -359,8 +382,5 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
 }
 
 fn selected_rel_path(state: &AppState, node_idx: usize) -> Option<PathBuf> {
-    state.nodes.get(node_idx).and_then(|node| match &node.kind {
-        NodeKind::File { .. } => Some(node.path.clone()),
-        NodeKind::Folder { .. } => None,
-    })
+    state.nodes.get(node_idx).map(|node| node.path.clone())
 }

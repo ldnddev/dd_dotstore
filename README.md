@@ -24,8 +24,10 @@ q / Esc         Quit
 F1              Help modal
 F2              Credits modal
 j / k / ↑ / ↓   Navigate list
-Space           Expand/collapse folder OR toggle file selection
-Enter / e       Edit destination (file only)
+Space           Toggle selection (file/folder)
+Enter           Edit destination (file/folder)
+e               Edit destination (file/folder)
+h/l or ←/→      Collapse/expand folder
 s               Bulk create symlinks (confirm)
 x               Bulk remove symlinks (confirm)
 u               Undo last action
