@@ -530,3 +530,137 @@ fn bulk_create_conflict_requires_overwrite_confirmation() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn space_toggles_folder_selection_in_main_view() {
+    let root = temp_path("dd_dotstore_test_folder_select");
+    fs::create_dir_all(root.join("nvim")).expect("create nvim dir");
+    fs::write(root.join("nvim/init.lua"), "return {}").expect("write file");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let folder_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new("nvim"))
+        .expect("find folder index");
+
+    app.state.list_state.select(Some(folder_idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char(' '))).expect("space");
+
+    let node = find_node(&app.state.tree, Path::new("nvim")).expect("find folder node");
+    assert!(node.selected, "space should toggle folder selection");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn hl_toggles_folder_expand_collapse() {
+    let root = temp_path("dd_dotstore_test_folder_expand");
+    fs::create_dir_all(root.join("tmux")).expect("create tmux dir");
+    fs::write(root.join("tmux/tmux.conf"), "set -g mouse on").expect("write file");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let folder_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new("tmux"))
+        .expect("find folder index");
+
+    app.state.list_state.select(Some(folder_idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('l'))).expect("l expand");
+    let expanded_node = find_node(&app.state.tree, Path::new("tmux")).expect("expanded node");
+    match &expanded_node.kind {
+        NodeKind::Folder { expanded, .. } => assert!(*expanded),
+        NodeKind::File { .. } => panic!("expected folder"),
+    }
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('h'))).expect("h collapse");
+    let collapsed_node = find_node(&app.state.tree, Path::new("tmux")).expect("collapsed node");
+    match &collapsed_node.kind {
+        NodeKind::Folder { expanded, .. } => assert!(!*expanded),
+        NodeKind::File { .. } => panic!("expected folder"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn enter_on_folder_opens_destination_editor() {
+    let root = temp_path("dd_dotstore_test_folder_enter_dest");
+    fs::create_dir_all(root.join("kitty")).expect("create kitty dir");
+    fs::create_dir_all(root.join("home")).expect("create home dir");
+    fs::write(root.join("kitty/kitty.conf"), "font_family FiraCode").expect("write file");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let folder_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new("kitty"))
+        .expect("find folder index");
+
+    app.state.list_state.select(Some(folder_idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Enter)).expect("enter on folder");
+    assert!(matches!(app.state.modal, Some(Modal::EditDest { .. })));
+    if let Some(Modal::EditDest { browser, .. }) = &mut app.state.modal {
+        browser.current = root.join("home");
+        browser.refresh_entries();
+    } else {
+        panic!("expected destination modal");
+    }
+    let _ = handle_key(
+        &mut app.state,
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+    )
+    .expect("ctrl+s choose current dir");
+
+    let node = find_node(&app.state.tree, Path::new("kitty")).expect("folder node");
+    match &node.kind {
+        NodeKind::Folder { dest, .. } => assert_eq!(dest.as_ref(), Some(&root.join("home/kitty"))),
+        NodeKind::File { .. } => panic!("expected folder"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn bulk_create_and_remove_supports_selected_folders() {
+    let root = temp_path("dd_dotstore_test_folder_bulk");
+    fs::create_dir_all(root.join("alacritty")).expect("create alacritty dir");
+    fs::write(root.join("alacritty/alacritty.toml"), "[window]").expect("write file");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let folder_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new("alacritty"))
+        .expect("find folder index");
+    let folder_link = root.join(".linked/alacritty");
+
+    app.state.list_state.select(Some(folder_idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char(' '))).expect("select folder");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('s'))).expect("open bulk create");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("confirm create");
+
+    assert!(
+        fs::symlink_metadata(&folder_link)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false),
+        "expected folder symlink at fallback destination"
+    );
+
+    app.state.list_state.select(Some(folder_idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char(' '))).expect("reselect folder");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('x'))).expect("open bulk remove");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("confirm remove");
+
+    assert!(
+        fs::symlink_metadata(&folder_link).is_err(),
+        "expected folder symlink to be removed"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}

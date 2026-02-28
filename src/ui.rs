@@ -110,8 +110,11 @@ fn draw_status_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
     let mut lines = vec![];
 
     fn collect_symlinks(node: &Node, out: &mut Vec<String>) {
-        if let NodeKind::File { dest: Some(d) } = &node.kind {
-            out.push(format!("• {} -> {}", node.path.display(), d.display()));
+        match &node.kind {
+            NodeKind::File { dest: Some(d) } | NodeKind::Folder { dest: Some(d), .. } => {
+                out.push(format!("• {} -> {}", node.path.display(), d.display()));
+            }
+            NodeKind::File { dest: None } | NodeKind::Folder { dest: None, .. } => {}
         }
         if let NodeKind::Folder { children, .. } = &node.kind {
             for c in children {
@@ -267,8 +270,10 @@ q / Esc      Quit\n\
 F1           Toggle help\n\
 F2           Toggle credits\n\
 j/k or ↑/↓   Navigate\n\
-Space        Expand/collapse folder or toggle file select\n\
-Enter / e    Edit destination (file)\n\
+Space        Toggle selection (file/folder)\n\
+Enter        Edit destination (file/folder)\n\
+e            Edit destination (file/folder)\n\
+h/l or ←/→   Collapse/expand folder\n\
 s            Bulk create selected symlinks\n\
 x            Bulk remove selected symlinks\n\
 u            Undo last action\n\

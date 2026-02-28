@@ -31,6 +31,7 @@ pub fn build_tree(root: &Path, ignores: &[String]) -> Vec<Node> {
                 NodeKind::Folder {
                     children: recurse(&path, root, ignores),
                     expanded: false,
+                    dest: None,
                 }
             } else {
                 NodeKind::File { dest: None }
@@ -77,7 +78,9 @@ pub fn flatten_visible(state: &mut AppState) {
             out.push(display);
         }
 
-        if let NodeKind::Folder { children, expanded } = &node.kind
+        if let NodeKind::Folder {
+            children, expanded, ..
+        } = &node.kind
             && *expanded
         {
             for child in children {
@@ -146,17 +149,25 @@ pub fn find_node<'a>(nodes: &'a [Node], target: &Path) -> Option<&'a Node> {
 }
 
 pub fn set_dest(nodes: &mut [Node], rel: &Path, dest: Option<PathBuf>) {
-    if let Some(node) = find_mut_node(nodes, rel)
-        && let NodeKind::File { dest: node_dest } = &mut node.kind
-    {
-        *node_dest = dest;
+    if let Some(node) = find_mut_node(nodes, rel) {
+        match &mut node.kind {
+            NodeKind::File { dest: node_dest }
+            | NodeKind::Folder {
+                dest: node_dest, ..
+            } => {
+                *node_dest = dest;
+            }
+        }
     }
 }
 
 pub fn update_symlink_statuses_recursive(nodes: &mut [Node], root: &Path) {
     for node in nodes {
         match &node.kind {
-            NodeKind::File { dest: Some(dest) } => {
+            NodeKind::File { dest: Some(dest) }
+            | NodeKind::Folder {
+                dest: Some(dest), ..
+            } => {
                 node.symlink_status = match fs::symlink_metadata(dest) {
                     Ok(meta) if meta.file_type().is_symlink() => match fs::read_link(dest) {
                         Ok(target) if target == root.join(&node.path) => SymlinkStatus::Valid,
@@ -166,10 +177,9 @@ pub fn update_symlink_statuses_recursive(nodes: &mut [Node], root: &Path) {
                     Err(_) => SymlinkStatus::Unknown,
                 };
             }
-            NodeKind::File { dest: None } => {
+            NodeKind::File { dest: None } | NodeKind::Folder { dest: None, .. } => {
                 node.symlink_status = SymlinkStatus::None;
             }
-            NodeKind::Folder { .. } => {}
         }
 
         if let NodeKind::Folder { children, .. } = &mut node.kind {

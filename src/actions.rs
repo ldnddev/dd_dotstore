@@ -89,18 +89,35 @@ pub fn remove_symlink(state: &mut AppState, rel_src: &Path) -> Result<bool> {
     let mut removed = false;
     let mut old_dest: Option<PathBuf> = None;
 
-    if let Some(node) = find_mut_node(&mut state.tree, rel_src)
-        && let NodeKind::File { dest } = &mut node.kind
-    {
-        old_dest = dest.clone();
-        if let Some(dest_path) = dest.as_ref()
-            && let Ok(meta) = fs::symlink_metadata(dest_path)
-            && meta.file_type().is_symlink()
-        {
-            fs::remove_file(dest_path)?;
-            removed = true;
+    if let Some(node) = find_mut_node(&mut state.tree, rel_src) {
+        match &mut node.kind {
+            NodeKind::File { dest } => {
+                old_dest = dest
+                    .clone()
+                    .or_else(|| Some(state.project_root.join(".linked").join(rel_src)));
+                if let Some(dest_path) = old_dest.as_ref()
+                    && let Ok(meta) = fs::symlink_metadata(dest_path)
+                    && meta.file_type().is_symlink()
+                {
+                    fs::remove_file(dest_path)?;
+                    removed = true;
+                }
+                *dest = None;
+            }
+            NodeKind::Folder { dest, .. } => {
+                old_dest = dest
+                    .clone()
+                    .or_else(|| Some(state.project_root.join(".linked").join(rel_src)));
+                if let Some(dest_path) = old_dest.as_ref()
+                    && let Ok(meta) = fs::symlink_metadata(dest_path)
+                    && meta.file_type().is_symlink()
+                {
+                    fs::remove_file(dest_path)?;
+                    removed = true;
+                }
+                *dest = None;
+            }
         }
-        *dest = None;
     }
 
     if removed && let Some(dest) = old_dest {
@@ -131,7 +148,6 @@ pub fn confirm_bulk_with_overwrite(
         .nodes
         .iter()
         .filter(|n| n.selected)
-        .filter(|n| matches!(n.kind, NodeKind::File { .. }))
         .map(|n| n.path.clone())
         .collect();
 
@@ -142,7 +158,7 @@ pub fn confirm_bulk_with_overwrite(
                 let dest = find_mut_node(&mut state.tree, &rel)
                     .and_then(|n| match &n.kind {
                         NodeKind::File { dest } => dest.clone(),
-                        NodeKind::Folder { .. } => None,
+                        NodeKind::Folder { dest, .. } => dest.clone(),
                     })
                     .unwrap_or(fallback);
                 let _ = create_symlink_with_overwrite(state, &rel, &dest, overwrite_real_files)?;
@@ -165,16 +181,14 @@ pub fn selected_create_conflicts(state: &AppState) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
     let mut seen = HashSet::new();
 
-    for node in state
-        .nodes
-        .iter()
-        .filter(|n| n.selected)
-        .filter(|n| matches!(n.kind, NodeKind::File { .. }))
-    {
+    for node in state.nodes.iter().filter(|n| n.selected) {
         let dest = match &node.kind {
             NodeKind::File { dest: Some(d) } => d.clone(),
             NodeKind::File { dest: None } => state.project_root.join(".linked").join(&node.path),
-            NodeKind::Folder { .. } => continue,
+            NodeKind::Folder { dest: Some(d), .. } => d.clone(),
+            NodeKind::Folder { dest: None, .. } => {
+                state.project_root.join(".linked").join(&node.path)
+            }
         };
 
         if seen.contains(&dest) {
@@ -220,20 +234,23 @@ pub fn undo_last(state: &mut AppState) -> Result<()> {
 }
 
 pub fn assign_destination(state: &mut AppState, rel_src: &Path, dest: PathBuf) -> Result<()> {
-    if let Some(node) = find_mut_node(&mut state.tree, rel_src)
-        && let NodeKind::File { dest: current_dest } = &mut node.kind
-        && let Some(old_dest) = current_dest.clone()
-        && old_dest != dest
-        && let Ok(meta) = fs::symlink_metadata(&old_dest)
-        && meta.file_type().is_symlink()
-    {
-        state.modal = Some(Modal::Error {
-            msg: format!(
-                "Destination is locked by existing symlink: {}. Remove it first with bulk remove (x).",
-                old_dest.display()
-            ),
-        });
-        return Ok(());
+    if let Some(node) = find_mut_node(&mut state.tree, rel_src) {
+        let current_dest = match &mut node.kind {
+            NodeKind::File { dest: d } | NodeKind::Folder { dest: d, .. } => d.clone(),
+        };
+        if let Some(old_dest) = current_dest
+            && old_dest != dest
+            && let Ok(meta) = fs::symlink_metadata(&old_dest)
+            && meta.file_type().is_symlink()
+        {
+            state.modal = Some(Modal::Error {
+                msg: format!(
+                    "Destination is locked by existing symlink: {}. Remove it first with bulk remove (x).",
+                    old_dest.display()
+                ),
+            });
+            return Ok(());
+        }
     }
 
     set_dest(&mut state.tree, rel_src, Some(dest));

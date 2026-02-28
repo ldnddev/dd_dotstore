@@ -7,8 +7,14 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub enum NodeKind {
-    File { dest: Option<PathBuf> },
-    Folder { children: Vec<Node>, expanded: bool },
+    File {
+        dest: Option<PathBuf>,
+    },
+    Folder {
+        children: Vec<Node>,
+        expanded: bool,
+        dest: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -308,11 +314,15 @@ pub fn save(state: &AppState, path: &Path) -> Result<()> {
     let mut symlinks = HashMap::new();
 
     fn collect(node: &Node, out: &mut HashMap<String, String>) {
-        if let NodeKind::File { dest: Some(d) } = &node.kind {
-            out.insert(
-                node.path.to_string_lossy().to_string(),
-                d.to_string_lossy().to_string(),
-            );
+        match &node.kind {
+            NodeKind::File { dest: Some(d) } | NodeKind::Folder { dest: Some(d), .. } => {
+                out.insert(
+                    node.path.to_string_lossy().to_string(),
+                    d.to_string_lossy().to_string(),
+                );
+            }
+            NodeKind::File { dest: None } => {}
+            NodeKind::Folder { dest: None, .. } => {}
         }
         if let NodeKind::Folder { children, .. } = &node.kind {
             for child in children {
