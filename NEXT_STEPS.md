@@ -23,12 +23,17 @@
   - clear popup background
   - correct selected-row highlighting
   - real vertical scrollbar widget
+- Enabled destination editing for folders (not only files).
 
 ### UX additions
 - Added status bar hints.
 - Added `F1` Help modal.
 - Added `F2` Credits modal.
 - Added rotating header copy (5 provided taglines, randomized on app start).
+- Updated main key behavior:
+  - `Space` toggles selection for files/folders
+  - `Enter` opens destination editor for files/folders
+  - `h/l` or `←/→` collapse/expand folders
 
 ### CLI improvements
 - Added root override support:
@@ -46,6 +51,13 @@
 - Improved source fuzzy filter matching to avoid repeated lowercase allocation in traversal.
 - Added large-tree filtering test coverage.
 
+### Folder symlink behavior updates
+- Added explicit folder destination support in `NodeKind::Folder` state.
+- Folder destinations now persist in `.dd_dotstore.json` like file destinations.
+- Bulk create/remove now respects selected folder destinations (fallback still `.linked/<path>` if unset).
+- Conflict detection includes selected folders and their resolved destination path.
+- Symlink status panel now includes folder symlink entries.
+
 ### Documentation / release prep
 - Updated `README.md` to reflect current keys and CLI usage.
 - Added install section and adjusted to `~/.local/bin` copy flow.
@@ -55,20 +67,27 @@
 ## Test/quality status
 - `cargo test --offline` passing.
 - `cargo clippy --offline --all-targets --all-features -- -D warnings` passing.
-- Current integration/unit test count: 16 tests in `tests/dotfiles_test.rs`, plus tests in `src/main.rs` and `src/actions.rs`.
+- Latest local verification in this session:
+  - `cargo test` passing
+  - `tests/dotfiles_test.rs`: 20 passing tests
+  - plus tests in `src/main.rs` and `src/actions.rs`
 
 ## Notes from latest user interaction
-- User ran `cargo install --path .` and got binary in `~/.cargo/bin` (expected behavior).
-- User prefers install target `~/.local/bin/dd_dotstore` in docs.
+- User reported regression: after space-to-toggle change, folders could no longer be selected/symlinked as full directories.
+- Follow-up issue: pressing `Enter` on a folder only expanded/collapsed and did not allow destination assignment.
+- Both issues were addressed with keymap and folder-destination state changes.
 
 ## Likely next actions when resuming
 1. Decide final install guidance strategy in README:
    - Option A: only `~/.local/bin` copy flow
    - Option B: show both `cargo install` (`~/.cargo/bin`) and manual copy (`~/.local/bin`)
-2. Commit/version/tag for release:
+2. Quick UX smoke pass in TUI for new key behavior:
+   - folder select + assign destination + bulk create/remove
+   - ensure no accidental conflicts with modal key handling
+3. Commit/version/tag for release:
    - include docs + release notes updates
    - tag `v1.0.0`
-3. Optional polish after release:
+4. Optional polish after release:
    - make credits/taglines data-driven (JSON/TOML)
    - improve import picker date formatting (human-readable)
    - add benchmarks for very large trees
@@ -84,4 +103,3 @@
 - `tests/dotfiles_test.rs`
 - `README.md`
 - `RELEASE_NOTES.md`
-
