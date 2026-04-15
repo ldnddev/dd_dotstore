@@ -60,6 +60,7 @@ fn local_standard_theme_file_is_loaded() {
     fs::write(
         root.join("dd_dotstore_theme.yml"),
         r##"
+version: 1
 colors:
   base_background: "#010203"
   body_background: "#111213"
@@ -93,9 +94,59 @@ colors:
 
     let theme = load_theme(&root).expect("load theme");
     assert_eq!(theme.source, ThemeSource::Local);
+    assert_eq!(theme.version, 1);
     assert_eq!(theme.colors.base_background, Color::Rgb(1, 2, 3));
     assert_eq!(theme.colors.border_active, Color::Rgb(0xb1, 0xb2, 0xb3));
     assert_eq!(theme.colors.links, Color::Rgb(0x9a, 0x9b, 0x9c));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn theme_requires_schema_version() {
+    let root = temp_path("dd_dotstore_test_theme_missing_version");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(
+        root.join("dd_dotstore_theme.yml"),
+        r##"
+colors:
+  base_background: "#010203"
+"##,
+    )
+    .expect("write theme");
+
+    let err = match load_theme(&root) {
+        Ok(_) => panic!("missing version should fail"),
+        Err(err) => err,
+    };
+    let full_error = format!("{err:#}");
+    assert!(full_error.contains("Missing required theme key `version`"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn app_falls_back_to_default_theme_when_theme_version_is_unsupported() {
+    let root = temp_path("dd_dotstore_test_theme_unsupported_version");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(
+        root.join("dd_dotstore_theme.yml"),
+        r##"
+version: 999
+colors:
+  base_background: "#010203"
+"##,
+    )
+    .expect("write theme");
+
+    let app = App::new_with_root(&root).expect("app init falls back");
+    assert_eq!(app.state.theme.source, ThemeSource::Default);
+    assert!(
+        app.state
+            .theme_status
+            .message
+            .contains("Unsupported theme schema version")
+    );
 
     let _ = fs::remove_dir_all(root);
 }

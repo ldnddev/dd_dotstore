@@ -1,4 +1,6 @@
-use crate::state::{ActionMode, AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus};
+use crate::state::{
+    ActionMode, AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus, ThemeStatusLevel,
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -17,7 +19,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(2),
         ])
         .split(f.area());
 
@@ -49,9 +51,17 @@ fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
-    let bar = Paragraph::new(
-        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit",
-    )
+    let theme_status_style = match state.theme_status.level {
+        ThemeStatusLevel::Healthy => state.theme.info,
+        ThemeStatusLevel::Warning => state.theme.warning,
+    };
+    let bar = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Theme status: ", state.theme.label),
+            Span::styled(state.theme_status.message.as_str(), theme_status_style),
+        ]),
+        Line::from("F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit"),
+    ])
     .block(Block::default())
     .style(state.theme.app_shell);
     f.render_widget(bar, area);
@@ -361,9 +371,11 @@ E            Export picker\n";
 - Ratatui + Crossterm: TUI stack\n\
 \n\
 Theme source: {}\n\
+Theme status: {}\n\
 \n\
 Press Esc/F2 to close.",
-                    state.theme.source.label()
+                    state.theme.source.label(),
+                    state.theme_status.message
                 );
                 let text = Paragraph::new(credits)
                     .block(

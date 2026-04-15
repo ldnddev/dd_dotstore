@@ -261,6 +261,40 @@ impl ThemeSource {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemeStatusLevel {
+    Healthy,
+    Warning,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThemeStatus {
+    pub level: ThemeStatusLevel,
+    pub message: String,
+}
+
+impl ThemeStatus {
+    pub fn healthy(source: ThemeSource, version: u64) -> Self {
+        Self {
+            level: ThemeStatusLevel::Healthy,
+            message: format!("Theme OK: {} schema v{}", source.label(), version),
+        }
+    }
+
+    pub fn warning(message: impl Into<String>) -> Self {
+        Self {
+            level: ThemeStatusLevel::Warning,
+            message: message.into(),
+        }
+    }
+}
+
+impl Default for ThemeStatus {
+    fn default() -> Self {
+        Self::healthy(ThemeSource::Default, SUPPORTED_THEME_VERSION)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct ThemeColors {
     pub base_background: Color,
@@ -327,6 +361,7 @@ impl Default for ThemeColors {
 #[derive(Clone)]
 pub struct Theme {
     pub source: ThemeSource,
+    pub version: u64,
     pub colors: ThemeColors,
     pub app_shell: Style,
     pub body: Style,
@@ -359,9 +394,10 @@ pub struct Theme {
 }
 
 impl Theme {
-    pub fn from_colors(colors: ThemeColors, source: ThemeSource) -> Self {
+    pub fn from_colors(colors: ThemeColors, source: ThemeSource, version: u64) -> Self {
         Self {
             source,
+            version,
             colors,
             app_shell: Style::default()
                 .fg(colors.text_primary)
@@ -438,11 +474,16 @@ impl Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Self::from_colors(ThemeColors::default(), ThemeSource::Default)
+        Self::from_colors(
+            ThemeColors::default(),
+            ThemeSource::Default,
+            SUPPORTED_THEME_VERSION,
+        )
     }
 }
 
 const THEME_FILE_NAME: &str = "dd_dotstore_theme.yml";
+const SUPPORTED_THEME_VERSION: u64 = 1;
 
 pub fn load_theme(project_root: &Path) -> Result<Theme> {
     let local = project_root.join(THEME_FILE_NAME);
@@ -466,9 +507,44 @@ pub fn load_theme(project_root: &Path) -> Result<Theme> {
 fn load_theme_file(path: &Path, source: ThemeSource) -> Result<Theme> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read theme file: {}", path.display()))?;
+    let version = parse_theme_version(&content)
+        .with_context(|| format!("Failed to parse theme file: {}", path.display()))?;
+    if version != SUPPORTED_THEME_VERSION {
+        return Err(anyhow!(
+            "Unsupported theme schema version `{version}` in {}; expected `{SUPPORTED_THEME_VERSION}`",
+            path.display()
+        ));
+    }
     let colors = parse_theme_colors(&content)
         .with_context(|| format!("Failed to parse theme file: {}", path.display()))?;
-    Ok(Theme::from_colors(colors, source))
+    Ok(Theme::from_colors(colors, source, version))
+}
+
+fn parse_theme_version(content: &str) -> Result<u64> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "colors:" {
+            break;
+        }
+        let Some((raw_key, raw_value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        if raw_key.trim() != "version" {
+            continue;
+        }
+        let value = extract_yaml_string_value(raw_value.trim())
+            .ok_or_else(|| anyhow!("Missing value for theme key `version`"))?;
+        return value
+            .parse::<u64>()
+            .context("Theme key `version` must be an integer");
+    }
+
+    Err(anyhow!(
+        "Missing required theme key `version`; expected `{SUPPORTED_THEME_VERSION}`"
+    ))
 }
 
 fn parse_theme_colors(content: &str) -> Result<ThemeColors> {
@@ -582,6 +658,7 @@ pub struct AppState {
     pub header_copy: String,
     pub persisted_symlinks: HashMap<String, String>,
     pub persisted_modes: HashMap<String, ActionMode>,
+    pub theme_status: ThemeStatus,
 }
 
 impl AppState {

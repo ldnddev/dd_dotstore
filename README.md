@@ -14,6 +14,8 @@ TUI tool to manage Linux dotfiles: select project folder, assign destinations, c
 - Fuzzy filter on source panel
 - Ignore patterns (editable)
 - Shared ldnddev theme support
+- Theme schema version validation (`version: 1`)
+- Startup theme health/status in the footer
 - Symlink status icons (✓ valid, ✗ broken)
 - Import/export configs (`~/.dd_dotstore/exports/`, newest-first import list)
 - Confirm dialogs + overwrite warnings
@@ -75,26 +77,48 @@ Theme lookup order:
 2. `~/.config/ldnddev/dd_dotstore_theme.yml`
 3. Built-in defaults
 
+Theme files must include the supported schema version:
+
+```yaml
+version: 1
+colors:
+  base_background: "#0F1114"
+  # ...
+```
+
+At startup, the footer shows theme health/status, including the active source and schema version. If a local or global theme is missing required fields, has an unsupported version, or cannot be parsed, `dd_dotstore` falls back to built-in defaults and shows a warning in the footer.
+
 The credits modal shows the active theme source as `local`, `global`, or `default`.
 
 ## Install
 
 ```bash
-# Build release binary
-cargo build --release
+# Build release binary, install to ~/.local/bin, and copy the theme to
+# ~/.config/ldnddev/dd_dotstore_theme.yml
+./install.sh
 
-# Install to ~/.local/bin/dd_dotstore
-mkdir -p "$HOME/.local/bin"
-cp target/release/dd_dotstore "$HOME/.local/bin/dd_dotstore"
-chmod +x "$HOME/.local/bin/dd_dotstore"
+# Install somewhere else
+PREFIX=/usr/local ./install.sh
+BINDIR=/opt/bin ./install.sh
 
-# Ensure ~/.local/bin is on PATH (bash)
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+# Use a custom config root for the global theme
+XDG_CONFIG_HOME="$HOME/.config" ./install.sh
 
 # Verify
 dd_dotstore --help
 ```
+
+The installer requires Rust 1.70+ and `cargo`. It warns if the target bin directory is not on `PATH`.
+
+## Uninstall
+
+```bash
+./install.sh -uninstall
+# or
+./install.sh --uninstall
+```
+
+Uninstall removes the installed binary and `~/.config/ldnddev/dd_dotstore_theme.yml`. The `ldnddev` theme directory is removed only if it is empty.
 
 ## Test
 ```bash
