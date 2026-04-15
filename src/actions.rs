@@ -1,5 +1,5 @@
-use crate::state::{Action, AppState, BulkAction, Conflict, Modal, NodeKind};
-use crate::tree::{find_mut_node, flatten_visible, set_dest};
+use crate::state::{Action, ActionMode, AppState, BulkAction, Conflict, Modal, NodeKind};
+use crate::tree::{find_mut_node, flatten_visible, set_action_mode, set_dest};
 use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 use std::fs;
@@ -18,6 +18,10 @@ pub fn push_history(state: &mut AppState, action: Action) {
 
 pub fn create_symlink(state: &mut AppState, rel_src: &Path, dest: &Path) -> Result<bool> {
     create_symlink_with_overwrite(state, rel_src, dest, false)
+}
+
+pub fn create_copy(state: &mut AppState, rel_src: &Path, dest: &Path) -> Result<bool> {
+    create_copy_with_overwrite(state, rel_src, dest, false)
 }
 
 fn create_symlink_with_overwrite(
@@ -71,6 +75,7 @@ fn create_symlink_with_overwrite(
         })?;
 
         set_dest(&mut state.tree, rel_src, Some(dest.to_path_buf()));
+        set_action_mode(&mut state.tree, rel_src, ActionMode::Symlink);
         push_history(
             state,
             Action::Create {
@@ -85,22 +90,89 @@ fn create_symlink_with_overwrite(
     }
 }
 
+fn create_copy_with_overwrite(
+    state: &mut AppState,
+    rel_src: &Path,
+    dest: &Path,
+    overwrite_existing: bool,
+) -> Result<bool> {
+    let src_abs = state.project_root.join(rel_src);
+    if !src_abs.exists() {
+        bail!("Source does not exist: {}", src_abs.display());
+    }
+
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create parent directory: {}", parent.display()))?;
+    }
+
+    if fs::symlink_metadata(dest).is_ok() {
+        if !overwrite_existing {
+            return Ok(false);
+        }
+        remove_path_any(dest)?;
+    }
+
+    copy_path_recursive(&src_abs, dest)
+        .with_context(|| format!("Failed to copy {} to {}", src_abs.display(), dest.display()))?;
+
+    set_dest(&mut state.tree, rel_src, Some(dest.to_path_buf()));
+    set_action_mode(&mut state.tree, rel_src, ActionMode::Copy);
+    push_history(
+        state,
+        Action::Copy {
+            src: rel_src.to_path_buf(),
+            dest: dest.to_path_buf(),
+        },
+    );
+
+    flatten_visible(state);
+    state.update_symlink_statuses()?;
+    Ok(true)
+}
+
+fn copy_path_recursive(src: &Path, dest: &Path) -> Result<()> {
+    let meta = fs::metadata(src)?;
+    if meta.is_dir() {
+        fs::create_dir_all(dest)?;
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            copy_path_recursive(&entry.path(), &dest.join(entry.file_name()))?;
+        }
+    } else {
+        let _ = fs::copy(src, dest)?;
+    }
+    Ok(())
+}
+
+fn remove_path_any(path: &Path) -> Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() || meta.is_file() {
+        fs::remove_file(path)?;
+    } else if meta.is_dir() {
+        fs::remove_dir_all(path)?;
+    }
+    Ok(())
+}
+
 pub fn remove_symlink(state: &mut AppState, rel_src: &Path) -> Result<bool> {
+    remove_deployed_item(state, rel_src)
+}
+
+fn remove_deployed_item(state: &mut AppState, rel_src: &Path) -> Result<bool> {
     let mut removed = false;
     let mut old_dest: Option<PathBuf> = None;
+    let mut removed_mode = ActionMode::Symlink;
 
     if let Some(node) = find_mut_node(&mut state.tree, rel_src) {
+        removed_mode = node.action_mode;
         match &mut node.kind {
             NodeKind::File { dest } => {
                 old_dest = dest
                     .clone()
                     .or_else(|| Some(state.project_root.join(".linked").join(rel_src)));
-                if let Some(dest_path) = old_dest.as_ref()
-                    && let Ok(meta) = fs::symlink_metadata(dest_path)
-                    && meta.file_type().is_symlink()
-                {
-                    fs::remove_file(dest_path)?;
-                    removed = true;
+                if let Some(dest_path) = old_dest.as_ref() {
+                    removed = remove_destination_for_mode(dest_path, node.action_mode)?;
                 }
                 *dest = None;
             }
@@ -108,12 +180,8 @@ pub fn remove_symlink(state: &mut AppState, rel_src: &Path) -> Result<bool> {
                 old_dest = dest
                     .clone()
                     .or_else(|| Some(state.project_root.join(".linked").join(rel_src)));
-                if let Some(dest_path) = old_dest.as_ref()
-                    && let Ok(meta) = fs::symlink_metadata(dest_path)
-                    && meta.file_type().is_symlink()
-                {
-                    fs::remove_file(dest_path)?;
-                    removed = true;
+                if let Some(dest_path) = old_dest.as_ref() {
+                    removed = remove_destination_for_mode(dest_path, node.action_mode)?;
                 }
                 *dest = None;
             }
@@ -121,18 +189,40 @@ pub fn remove_symlink(state: &mut AppState, rel_src: &Path) -> Result<bool> {
     }
 
     if removed && let Some(dest) = old_dest {
-        push_history(
-            state,
-            Action::Remove {
+        let action = match removed_mode {
+            ActionMode::Symlink => Action::Remove {
                 src: rel_src.to_path_buf(),
                 dest,
             },
-        );
+            ActionMode::Copy => Action::RemoveCopy {
+                src: rel_src.to_path_buf(),
+                dest,
+            },
+        };
+        push_history(state, action);
     }
 
     flatten_visible(state);
     state.update_symlink_statuses()?;
     Ok(removed)
+}
+
+fn remove_destination_for_mode(dest_path: &Path, action_mode: ActionMode) -> Result<bool> {
+    let Ok(meta) = fs::symlink_metadata(dest_path) else {
+        return Ok(false);
+    };
+
+    if meta.file_type().is_symlink() {
+        fs::remove_file(dest_path)?;
+        return Ok(true);
+    }
+
+    if action_mode == ActionMode::Copy {
+        remove_path_any(dest_path)?;
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 pub fn confirm_bulk(state: &mut AppState, action: BulkAction) -> Result<()> {
@@ -155,16 +245,31 @@ pub fn confirm_bulk_with_overwrite(
         match action {
             BulkAction::Create => {
                 let fallback = state.project_root.join(".linked").join(&rel);
-                let dest = find_mut_node(&mut state.tree, &rel)
+                let (dest, action_mode) = find_mut_node(&mut state.tree, &rel)
                     .and_then(|n| match &n.kind {
-                        NodeKind::File { dest } => dest.clone(),
-                        NodeKind::Folder { dest, .. } => dest.clone(),
+                        NodeKind::File { dest } => Some((dest.clone(), n.action_mode)),
+                        NodeKind::Folder { dest, .. } => Some((dest.clone(), n.action_mode)),
                     })
-                    .unwrap_or(fallback);
-                let _ = create_symlink_with_overwrite(state, &rel, &dest, overwrite_real_files)?;
+                    .map(|(dest, action_mode)| (dest.unwrap_or(fallback.clone()), action_mode))
+                    .unwrap_or((fallback, ActionMode::Symlink));
+
+                match action_mode {
+                    ActionMode::Symlink => {
+                        let _ = create_symlink_with_overwrite(
+                            state,
+                            &rel,
+                            &dest,
+                            overwrite_real_files,
+                        )?;
+                    }
+                    ActionMode::Copy => {
+                        let _ =
+                            create_copy_with_overwrite(state, &rel, &dest, overwrite_real_files)?;
+                    }
+                }
             }
             BulkAction::Remove => {
-                let _ = remove_symlink(state, &rel)?;
+                let _ = remove_deployed_item(state, &rel)?;
             }
         }
 
@@ -195,7 +300,7 @@ pub fn selected_create_conflicts(state: &AppState) -> Vec<Conflict> {
             continue;
         }
         if let Ok(meta) = fs::symlink_metadata(&dest)
-            && !meta.file_type().is_symlink()
+            && (node.action_mode == ActionMode::Copy || !meta.file_type().is_symlink())
         {
             conflicts.push(Conflict {
                 dest: dest.clone(),
@@ -222,8 +327,18 @@ pub fn undo_last(state: &mut AppState) -> Result<()> {
             }
             set_dest(&mut state.tree, &src, None);
         }
+        Action::Copy { src, dest } => {
+            if fs::symlink_metadata(&dest).is_ok() {
+                remove_path_any(&dest)?;
+            }
+            set_dest(&mut state.tree, &src, None);
+        }
         Action::Remove { src, dest } => {
             let _ = create_symlink(state, &src, &dest)?;
+            state.history.pop_back();
+        }
+        Action::RemoveCopy { src, dest } => {
+            let _ = create_copy(state, &src, &dest)?;
             state.history.pop_back();
         }
     }

@@ -1,11 +1,14 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_dotstore::actions::{
-    assign_destination, create_symlink, push_history, remove_symlink, undo_last,
+    assign_destination, create_copy, create_symlink, push_history, remove_symlink, undo_last,
 };
 use dd_dotstore::app::App;
 use dd_dotstore::inputs::handle_key;
-use dd_dotstore::state::{Action, BrowserState, DirEntry, Modal, NodeKind};
+use dd_dotstore::state::{
+    Action, ActionMode, BrowserState, DirEntry, Modal, NodeKind, ThemeSource, load_theme,
+};
 use dd_dotstore::tree::{build_tree, find_node, flatten_visible};
+use ratatui::style::Color;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -46,6 +49,53 @@ fn app_initializes_with_tree_nodes() {
     let app = App::new_with_root(&root).expect("app init");
     assert!(!app.state.tree.is_empty());
     assert!(!app.state.nodes.is_empty());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn local_standard_theme_file_is_loaded() {
+    let root = temp_path("dd_dotstore_test_theme_local");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(
+        root.join("dd_dotstore_theme.yml"),
+        r##"
+colors:
+  base_background: "#010203"
+  body_background: "#111213"
+  modal_background: "#212223"
+  text_primary: "#313233"
+  text_secondary: "#414243"
+  text_labels: "#515253"
+  text_active_focus: "#616263"
+  modal_labels: "#717273"
+  modal_text: "#818283"
+  selected_background: "#919293"
+  border_default: "#A1A2A3"
+  border_active: "#B1B2B3"
+  scrollbar: "#C1C2C3"
+  scrollbar_hover: "#D1D2D3"
+  input_border_default: "#E1E2E3"
+  input_border_focus: "#F1F2F3"
+  input_text_default: "#0A0B0C"
+  input_text_focus: "#1A1B1C"
+  cursor: "#2A2B2C"
+  success: "#3A3B3C"
+  warning: "#4A4B4C"
+  error: "#5A5B5C"
+  info: "#6A6B6C"
+  folders: "#7A7B7C"
+  files: "#8A8B8C"
+  links: "#9A9B9C"
+"##,
+    )
+    .expect("write theme");
+
+    let theme = load_theme(&root).expect("load theme");
+    assert_eq!(theme.source, ThemeSource::Local);
+    assert_eq!(theme.colors.base_background, Color::Rgb(1, 2, 3));
+    assert_eq!(theme.colors.border_active, Color::Rgb(0xb1, 0xb2, 0xb3));
+    assert_eq!(theme.colors.links, Color::Rgb(0x9a, 0x9b, 0x9c));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -181,6 +231,7 @@ fn undo_history_is_capped_and_undo_reverts_creation() {
     match app.state.history.front().expect("front action") {
         Action::Create { src, .. } => assert_eq!(src, &PathBuf::from("src_2")),
         Action::Remove { .. } => panic!("unexpected remove action"),
+        Action::Copy { .. } | Action::RemoveCopy { .. } => panic!("unexpected copy action"),
     }
 
     let rel = Path::new(".gitconfig");
@@ -194,6 +245,85 @@ fn undo_history_is_capped_and_undo_reverts_creation() {
         NodeKind::File { dest: node_dest } => assert!(node_dest.is_none()),
         NodeKind::Folder { .. } => panic!("expected file node"),
     }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn create_copy_copies_file_and_undo_removes_copy() {
+    let root = temp_path("dd_dotstore_test_copy_file");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".editorconfig"), "root = true").expect("write source");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let rel = Path::new(".editorconfig");
+    let dest = root.join("home/.editorconfig");
+
+    let copied = create_copy(&mut app.state, rel, &dest).expect("copy file");
+    assert!(copied);
+    assert_eq!(fs::read_to_string(&dest).expect("read copy"), "root = true");
+    assert!(
+        fs::symlink_metadata(&dest)
+            .map(|m| !m.file_type().is_symlink())
+            .unwrap_or(false)
+    );
+
+    undo_last(&mut app.state).expect("undo copy");
+    assert!(!dest.exists());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn bulk_copy_supports_selected_folders() {
+    let root = temp_path("dd_dotstore_test_copy_folder");
+    fs::create_dir_all(root.join("nvim/lua")).expect("create source dirs");
+    fs::write(root.join("nvim/init.lua"), "vim.opt.number = true").expect("write init");
+    fs::write(root.join("nvim/lua/plugins.lua"), "return {}").expect("write plugin");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let folder_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new("nvim"))
+        .expect("find folder index");
+
+    app.state.list_state.select(Some(folder_idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('m'))).expect("toggle mode");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char(' '))).expect("select folder");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('s'))).expect("open bulk create");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("confirm create");
+
+    let copied = root.join(".linked/nvim/lua/plugins.lua");
+    assert_eq!(
+        fs::read_to_string(copied).expect("read nested copy"),
+        "return {}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn action_mode_persists_across_reload() {
+    let root = temp_path("dd_dotstore_test_mode_persist");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".toolrc"), "mode=copy").expect("write source");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".toolrc"))
+        .expect("find source");
+    app.state.list_state.select(Some(idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('m'))).expect("toggle mode");
+    app.save().expect("save config");
+
+    let reloaded = App::new_with_root(&root).expect("reload app");
+    let node = find_node(&reloaded.state.tree, Path::new(".toolrc")).expect("find node");
+    assert_eq!(node.action_mode, ActionMode::Copy);
 
     let _ = fs::remove_dir_all(root);
 }

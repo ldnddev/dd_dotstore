@@ -6,7 +6,7 @@ use crate::actions::{
     import_from_path, open_export_picker, open_import_picker, selected_create_conflicts, undo_last,
 };
 use crate::state::{AppState, BrowserState, BulkAction, Modal, NodeKind};
-use crate::tree::{flatten_visible, toggle_expand, toggle_selected};
+use crate::tree::{find_mut_node, flatten_visible, toggle_expand, toggle_selected};
 use std::path::PathBuf;
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
@@ -33,6 +33,8 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         }
 
         KeyCode::Char(' ') => toggle_selection(state),
+        KeyCode::Char('m') => toggle_mode_for_highlighted(state),
+        KeyCode::Char('M') => toggle_mode_for_selected(state),
         KeyCode::Enter => activate_selected(state),
         KeyCode::Char('e') => open_dest_browser(state),
         KeyCode::Right | KeyCode::Char('l') => set_folder_expanded(state, true),
@@ -98,6 +100,53 @@ fn toggle_selection(state: &mut AppState) {
     state
         .list_state
         .select(Some(idx.min(state.nodes.len().saturating_sub(1))));
+}
+
+fn toggle_mode_for_highlighted(state: &mut AppState) {
+    let Some(idx) = state.list_state.selected() else {
+        return;
+    };
+    let Some(selected) = state.nodes.get(idx).cloned() else {
+        return;
+    };
+
+    if let Some(node) = find_mut_node(&mut state.tree, &selected.path) {
+        node.action_mode = node.action_mode.toggled();
+    }
+
+    flatten_visible(state);
+    state
+        .list_state
+        .select(Some(idx.min(state.nodes.len().saturating_sub(1))));
+}
+
+fn toggle_mode_for_selected(state: &mut AppState) {
+    let selected_paths: Vec<_> = state
+        .nodes
+        .iter()
+        .filter(|node| node.selected)
+        .map(|node| node.path.clone())
+        .collect();
+
+    if selected_paths.is_empty() {
+        toggle_mode_for_highlighted(state);
+        return;
+    }
+
+    let target_mode = selected_paths
+        .first()
+        .and_then(|path| find_mut_node(&mut state.tree, path))
+        .map(|node| node.action_mode.toggled());
+
+    if let Some(target_mode) = target_mode {
+        for path in selected_paths {
+            if let Some(node) = find_mut_node(&mut state.tree, &path) {
+                node.action_mode = target_mode;
+            }
+        }
+    }
+
+    flatten_visible(state);
 }
 
 fn activate_selected(state: &mut AppState) {

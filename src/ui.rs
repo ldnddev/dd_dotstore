@@ -1,4 +1,4 @@
-use crate::state::{AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus};
+use crate::state::{ActionMode, AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -10,6 +10,8 @@ use ratatui::{
 };
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
+    f.render_widget(Block::default().style(state.theme.app_shell), f.area());
+
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -28,7 +30,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
     draw_source_panel(f, state, chunks[0]);
     draw_status_panel(f, state, chunks[1]);
-    draw_status_bar(f, outer[2]);
+    draw_status_bar(f, state, outer[2]);
 
     if state.modal.is_some() {
         draw_modal(f, state, f.area());
@@ -40,16 +42,18 @@ fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
         Block::default()
             .title("dd_dotstore")
             .borders(Borders::ALL)
-            .border_style(state.theme.border),
+            .border_style(state.theme.active_border)
+            .style(state.theme.app_shell),
     );
     f.render_widget(header, area);
 }
 
-fn draw_status_bar(f: &mut Frame, area: Rect) {
-    let bar =
-        Paragraph::new("F1: Help   F2: Credits   /: Search   i: Import   E: Export   Q: Exit")
-            .block(Block::default())
-            .style(ratatui::style::Style::default());
+fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
+    let bar = Paragraph::new(
+        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit",
+    )
+    .block(Block::default())
+    .style(state.theme.app_shell);
     f.render_widget(bar, area);
 }
 
@@ -66,22 +70,27 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
             };
 
             let prefix = if node.selected { "[✓] " } else { "[ ] " };
+            let mode_style = match node.action_mode {
+                ActionMode::Symlink => state.theme.valid,
+                ActionMode::Copy => state.theme.highlight,
+            };
 
-            let name = match &node.kind {
+            let (name, name_style) = match &node.kind {
                 NodeKind::Folder { expanded, .. } => {
                     if *expanded {
-                        format!("> {}", node.name)
+                        (format!("> {}", node.name), state.theme.folder)
                     } else {
-                        format!("+ {}", node.name)
+                        (format!("+ {}", node.name), state.theme.folder)
                     }
                 }
-                _ => node.name.clone(),
+                _ => (node.name.clone(), state.theme.file),
             };
 
             let content = Line::from(vec![
                 Span::styled(prefix, state.theme.normal),
                 Span::styled(icon, icon_style),
-                Span::raw(name),
+                Span::styled(format!("[{}] ", node.action_mode.label()), mode_style),
+                Span::styled(name, name_style),
             ]);
 
             ListItem::new(content)
@@ -99,7 +108,8 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
             Block::default()
                 .title(title)
                 .borders(Borders::ALL)
-                .border_style(state.theme.border),
+                .border_style(state.theme.active_border)
+                .style(state.theme.body),
         )
         .highlight_style(state.theme.selected);
 
@@ -107,33 +117,53 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 fn draw_status_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let mut lines = vec![];
+    let mut lines: Vec<Line<'_>> = vec![];
 
-    fn collect_symlinks(node: &Node, out: &mut Vec<String>) {
+    fn collect_destinations<'a>(node: &Node, out: &mut Vec<Line<'a>>, theme: &crate::state::Theme) {
         match &node.kind {
             NodeKind::File { dest: Some(d) } | NodeKind::Folder { dest: Some(d), .. } => {
-                out.push(format!("• {} -> {}", node.path.display(), d.display()));
+                let arrow = match node.action_mode {
+                    ActionMode::Symlink => "->",
+                    ActionMode::Copy => "=>",
+                };
+                let mode_style = match node.action_mode {
+                    ActionMode::Symlink => theme.link,
+                    ActionMode::Copy => theme.warning,
+                };
+                let kind_style = match node.kind {
+                    NodeKind::Folder { .. } => theme.folder,
+                    NodeKind::File { .. } => theme.file,
+                };
+                out.push(Line::from(vec![
+                    Span::styled("• ", mode_style),
+                    Span::styled(node.action_mode.label().to_string(), mode_style),
+                    Span::raw(" "),
+                    Span::styled(node.path.display().to_string(), kind_style),
+                    Span::raw(format!(" {arrow} ")),
+                    Span::styled(d.display().to_string(), mode_style),
+                ]));
             }
             NodeKind::File { dest: None } | NodeKind::Folder { dest: None, .. } => {}
         }
         if let NodeKind::Folder { children, .. } = &node.kind {
             for c in children {
-                collect_symlinks(c, out);
+                collect_destinations(c, out, theme);
             }
         }
     }
 
     for node in &state.tree {
-        collect_symlinks(node, &mut lines);
+        collect_destinations(node, &mut lines, &state.theme);
     }
 
     let items: Vec<ListItem<'_>> = lines.into_iter().map(ListItem::new).collect();
 
     let list = List::new(items).block(
         Block::default()
-            .title("Symlinks")
+            .title("Destinations")
             .borders(Borders::ALL)
-            .border_style(state.theme.border),
+            .border_style(state.theme.border)
+            .style(state.theme.body),
     );
 
     f.render_stateful_widget(list, area, &mut state.status_list_state);
@@ -147,18 +177,20 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
         match modal {
             Modal::ConfirmBulk { action } => {
                 let title = match action {
-                    BulkAction::Create => "Create symlinks?",
-                    BulkAction::Remove => "Remove symlinks?",
+                    BulkAction::Create => "Apply selected items?",
+                    BulkAction::Remove => "Remove selected destinations?",
                 };
                 let text = Paragraph::new(
-                    "Confirm action for selected items?\nY = yes, any other key = cancel",
+                    "Use the LINK/COPY labels shown in Source.\nY/Enter = yes, any other key = cancel",
                 )
                 .block(
                     Block::default()
                         .title(title)
                         .borders(Borders::ALL)
-                        .border_style(state.theme.border),
-                );
+                        .border_style(state.theme.active_border)
+                        .style(state.theme.modal),
+                )
+                .style(state.theme.modal_text);
                 f.render_widget(text, modal_area);
             }
             Modal::OverwriteWarning { conflicts, .. } => {
@@ -178,26 +210,39 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
                     symlink_count,
                     names
                 );
-                let text = Paragraph::new(msg).block(
-                    Block::default()
-                        .title("Overwrite Warning")
-                        .borders(Borders::ALL)
-                        .border_style(state.theme.error),
-                );
+                let text = Paragraph::new(msg)
+                    .block(
+                        Block::default()
+                            .title("Overwrite Warning")
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.error)
+                            .style(state.theme.modal),
+                    )
+                    .style(state.theme.modal_text);
                 f.render_widget(text, modal_area);
             }
             Modal::Error { msg } => {
-                let text = Paragraph::new(msg.as_str()).block(
-                    Block::default()
-                        .title("Notice")
-                        .borders(Borders::ALL)
-                        .border_style(state.theme.error),
-                );
+                let text = Paragraph::new(msg.as_str())
+                    .block(
+                        Block::default()
+                            .title("Notice")
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.error)
+                            .style(state.theme.modal),
+                    )
+                    .style(state.theme.modal_text);
                 f.render_widget(text, modal_area);
             }
             Modal::Search => {
                 let text = Paragraph::new(format!("Filter: {}", state.filter))
-                    .block(Block::default().title("Search").borders(Borders::ALL));
+                    .style(state.theme.input_text_focus)
+                    .block(
+                        Block::default()
+                            .title("Search")
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.input_border_focus)
+                            .style(state.theme.modal),
+                    );
                 f.render_widget(text, modal_area);
             }
             Modal::EditDest { browser, .. } => {
@@ -216,7 +261,15 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
                         let entry_idx = *filtered.get(global)?;
                         let e = browser.entries.get(entry_idx)?;
                         let suffix = if e.is_dir { "/" } else { "" };
-                        Some(ListItem::new(format!("{}{}", e.name, suffix)))
+                        let style = if e.is_dir {
+                            state.theme.folder
+                        } else {
+                            state.theme.file
+                        };
+                        Some(ListItem::new(Line::from(Span::styled(
+                            format!("{}{}", e.name, suffix),
+                            style,
+                        ))))
                     })
                     .collect();
                 let title = format!(
@@ -233,8 +286,8 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
                         Block::default()
                             .title(title)
                             .borders(Borders::ALL)
-                            .border_style(state.theme.border)
-                            .style(state.theme.normal),
+                            .border_style(state.theme.input_border_focus)
+                            .style(state.theme.modal),
                     )
                     .highlight_style(state.theme.selected)
                     .highlight_symbol("> ");
@@ -251,16 +304,21 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
                         .viewport_content_length(view_rows);
                     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                         .begin_symbol(None)
-                        .end_symbol(None);
+                        .end_symbol(None)
+                        .thumb_style(state.theme.scrollbar);
                     f.render_stateful_widget(scrollbar, modal_area, &mut scrollbar_state);
                 }
             }
             Modal::IgnoreEditor { .. } => {
-                let text = Paragraph::new("Use j/k and d to edit ignores. Esc to close.").block(
-                    Block::default()
-                        .title("Ignore Editor")
-                        .borders(Borders::ALL),
-                );
+                let text = Paragraph::new("Use j/k and d to edit ignores. Esc to close.")
+                    .block(
+                        Block::default()
+                            .title("Ignore Editor")
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.active_border)
+                            .style(state.theme.modal),
+                    )
+                    .style(state.theme.modal_text);
                 f.render_widget(text, modal_area);
             }
             Modal::Help => {
@@ -274,36 +332,48 @@ Space        Toggle selection (file/folder)\n\
 Enter        Edit destination (file/folder)\n\
 e            Edit destination (file/folder)\n\
 h/l or ←/→   Collapse/expand folder\n\
-s            Bulk create selected symlinks\n\
-x            Bulk remove selected symlinks\n\
+s            Apply selected LINK/COPY items\n\
+x            Remove selected destinations\n\
+m            Toggle LINK/COPY for highlighted item\n\
+M            Set selected items to the next LINK/COPY mode\n\
 u            Undo last action\n\
 /            Search/filter\n\
 r            Reload tree\n\
 I            Ignore editor\n\
 i            Import picker\n\
 E            Export picker\n";
-                let text = Paragraph::new(help).block(
-                    Block::default()
-                        .title("Help")
-                        .borders(Borders::ALL)
-                        .border_style(state.theme.border),
-                );
+                let text = Paragraph::new(help)
+                    .block(
+                        Block::default()
+                            .title("Help")
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.active_border)
+                            .style(state.theme.modal),
+                    )
+                    .style(state.theme.modal_text);
                 f.render_widget(text, modal_area);
             }
             Modal::Credits => {
-                let credits = "Credits\n\
+                let credits = format!(
+                    "Credits\n\
 \n\
-- Catppuccin: color inspiration\n\
 - GNU Stow: dotfile workflow inspiration\n\
 - Ratatui + Crossterm: TUI stack\n\
 \n\
-Press Esc/F2 to close.";
-                let text = Paragraph::new(credits).block(
-                    Block::default()
-                        .title("Credits")
-                        .borders(Borders::ALL)
-                        .border_style(state.theme.border),
+Theme source: {}\n\
+\n\
+Press Esc/F2 to close.",
+                    state.theme.source.label()
                 );
+                let text = Paragraph::new(credits)
+                    .block(
+                        Block::default()
+                            .title("Credits")
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.active_border)
+                            .style(state.theme.modal),
+                    )
+                    .style(state.theme.modal_text);
                 f.render_widget(text, modal_area);
             }
             Modal::ImportPicker { files, selected } => {
@@ -328,12 +398,15 @@ Press Esc/F2 to close.";
                         ))
                     })
                     .collect();
-                let list = List::new(items).block(
-                    Block::default()
-                        .title("Import Picker (newest first; j/k, Enter, Esc)")
-                        .borders(Borders::ALL)
-                        .border_style(state.theme.border),
-                );
+                let list = List::new(items)
+                    .block(
+                        Block::default()
+                            .title("Import Picker (newest first; j/k, Enter, Esc)")
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.active_border)
+                            .style(state.theme.modal),
+                    )
+                    .highlight_style(state.theme.selected);
                 f.render_widget(list, modal_area);
             }
             Modal::ExportPicker { dir, filename } => {
@@ -346,8 +419,10 @@ Press Esc/F2 to close.";
                     Block::default()
                         .title("Export Picker")
                         .borders(Borders::ALL)
-                        .border_style(state.theme.border),
-                );
+                        .border_style(state.theme.input_border_focus)
+                        .style(state.theme.modal),
+                )
+                .style(state.theme.input_text_focus);
                 f.render_widget(text, modal_area);
             }
         }
