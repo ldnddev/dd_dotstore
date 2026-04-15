@@ -1,6 +1,6 @@
 # dd_dotstore
 
-TUI tool to manage Linux dotfiles: select project folder, assign symlink destinations, create/remove symlinks in bulk, persist config.
+TUI tool to manage Linux dotfiles: select project folder, assign destinations, create symlinks or copy files/folders in bulk, persist config.
 
 ## Features
 
@@ -8,11 +8,12 @@ TUI tool to manage Linux dotfiles: select project folder, assign symlink destina
 - Optional project root override via CLI (`--root <path>` or positional path)
 - Tree view of dotfiles (expand/collapse)
 - Assign symlink destinations via filesystem browser (`~`, `g/G`, fuzzy filter)
-- Multi-select files/folders → bulk create/remove symlinks
+- Multi-select files/folders → bulk link/copy or remove destinations
+- Per-item LINK/COPY mode for mixed batches
 - Undo last 10 actions (persisted)
 - Fuzzy filter on source panel
 - Ignore patterns (editable)
-- Catppuccin theme
+- Shared ldnddev theme support
 - Symlink status icons (✓ valid, ✗ broken)
 - Import/export configs (`~/.dd_dotstore/exports/`, newest-first import list)
 - Confirm dialogs + overwrite warnings
@@ -28,8 +29,10 @@ Space           Toggle selection (file/folder)
 Enter           Edit destination (file/folder)
 e               Edit destination (file/folder)
 h/l or ←/→      Collapse/expand folder
-s               Bulk create symlinks (confirm)
-x               Bulk remove symlinks (confirm)
+s               Apply selected LINK/COPY items (confirm)
+x               Remove selected destinations (confirm)
+m               Toggle LINK/COPY for highlighted item
+M               Set selected items to the next LINK/COPY mode
 u               Undo last action
 /               Open filter
 r               Reload tree
@@ -62,6 +65,17 @@ cargo run -- --help
 cargo build --release
 ./target/release/dd_dotstore
 ```
+
+## Theme
+
+`dd_dotstore` uses the shared ldnddev TUI theme schema from `THEME_STRUCTURE_STANDARD.md`.
+
+Theme lookup order:
+1. `./dd_dotstore_theme.yml`
+2. `~/.config/ldnddev/dd_dotstore_theme.yml`
+3. Built-in defaults
+
+The credits modal shows the active theme source as `local`, `global`, or `default`.
 
 ## Install
 

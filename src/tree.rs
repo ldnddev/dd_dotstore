@@ -1,4 +1,4 @@
-use crate::state::{AppState, Node, NodeKind, SymlinkStatus};
+use crate::state::{ActionMode, AppState, Node, NodeKind, SymlinkStatus};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -42,6 +42,7 @@ pub fn build_tree(root: &Path, ignores: &[String]) -> Vec<Node> {
                 path: rel_path,
                 kind,
                 selected: false,
+                action_mode: ActionMode::Symlink,
                 symlink_status: SymlinkStatus::None,
             };
 
@@ -161,6 +162,12 @@ pub fn set_dest(nodes: &mut [Node], rel: &Path, dest: Option<PathBuf>) {
     }
 }
 
+pub fn set_action_mode(nodes: &mut [Node], rel: &Path, action_mode: ActionMode) {
+    if let Some(node) = find_mut_node(nodes, rel) {
+        node.action_mode = action_mode;
+    }
+}
+
 pub fn update_symlink_statuses_recursive(nodes: &mut [Node], root: &Path) {
     for node in nodes {
         match &node.kind {
@@ -168,13 +175,20 @@ pub fn update_symlink_statuses_recursive(nodes: &mut [Node], root: &Path) {
             | NodeKind::Folder {
                 dest: Some(dest), ..
             } => {
-                node.symlink_status = match fs::symlink_metadata(dest) {
-                    Ok(meta) if meta.file_type().is_symlink() => match fs::read_link(dest) {
-                        Ok(target) if target == root.join(&node.path) => SymlinkStatus::Valid,
-                        _ => SymlinkStatus::Broken,
+                node.symlink_status = match node.action_mode {
+                    ActionMode::Symlink => match fs::symlink_metadata(dest) {
+                        Ok(meta) if meta.file_type().is_symlink() => match fs::read_link(dest) {
+                            Ok(target) if target == root.join(&node.path) => SymlinkStatus::Valid,
+                            _ => SymlinkStatus::Broken,
+                        },
+                        Ok(_) => SymlinkStatus::Broken,
+                        Err(_) => SymlinkStatus::Unknown,
                     },
-                    Ok(_) => SymlinkStatus::Broken,
-                    Err(_) => SymlinkStatus::Unknown,
+                    ActionMode::Copy => match fs::symlink_metadata(dest) {
+                        Ok(meta) if meta.file_type().is_symlink() => SymlinkStatus::Broken,
+                        Ok(_) => SymlinkStatus::Valid,
+                        Err(_) => SymlinkStatus::Unknown,
+                    },
                 };
             }
             NodeKind::File { dest: None } | NodeKind::Folder { dest: None, .. } => {

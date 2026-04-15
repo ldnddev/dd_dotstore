@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     inputs::handle_key,
-    state::{Action, AppState, load, save},
-    tree::{build_tree, flatten_visible, set_dest},
+    state::{Action, AppState, load, load_theme, save},
+    tree::{build_tree, flatten_visible, set_action_mode, set_dest},
     ui::draw,
 };
 
@@ -32,11 +32,15 @@ impl App {
 
         state.project_root = project_root.to_path_buf();
         state.config_path = config_path;
+        state.theme = load_theme(project_root)?;
         state.header_copy = random_header_copy().to_string();
         state.tree = build_tree(project_root, &state.ignore_patterns);
 
         for (rel, dest) in state.persisted_symlinks.clone() {
             set_dest(&mut state.tree, Path::new(&rel), Some(dest.into()));
+        }
+        for (rel, action_mode) in state.persisted_modes.clone() {
+            set_action_mode(&mut state.tree, Path::new(&rel), action_mode);
         }
 
         flatten_visible(&mut state);
