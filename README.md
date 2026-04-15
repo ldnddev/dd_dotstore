@@ -19,6 +19,7 @@ TUI tool to manage Linux dotfiles: select project folder, assign destinations, c
 - Symlink status icons (✓ valid, ✗ broken)
 - Import/export configs (`~/.dd_dotstore/exports/`, newest-first import list)
 - Confirm dialogs + overwrite warnings
+- Passive info/error notices appear as bottom-right toasts for 5 seconds
 - Help (`F1`) and credits (`F2`) modals
 
 ## Keybindings
@@ -42,13 +43,15 @@ I               Edit ignore patterns
 i / E           Import / Export config
 
 
-**Modal keys (when popup open):**
+**Modal keys (when interactive dialog open):**
 - Arrow / jk    Navigate
 - Enter         Confirm / select path
 - Esc           Cancel / close
 - y             Confirm bulk action
 - Delete / d    Remove ignore pattern (in editor)
 - Destination browser: type for fuzzy filter, `Ctrl+U` clear, `~` home, `g/G` jump, `PgUp/PgDn` scroll, `Ctrl+S` select current dir
+
+Passive notices do not require input. They appear as toasts in the bottom-right corner and disappear after 5 seconds.
 
 ## Run
 

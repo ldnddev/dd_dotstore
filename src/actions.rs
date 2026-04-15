@@ -1,4 +1,5 @@
 use crate::state::{Action, ActionMode, AppState, BulkAction, Conflict, Modal, NodeKind};
+use crate::toast::ToastLevel;
 use crate::tree::{find_mut_node, flatten_visible, set_action_mode, set_dest};
 use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
@@ -358,12 +359,13 @@ pub fn assign_destination(state: &mut AppState, rel_src: &Path, dest: PathBuf) -
             && let Ok(meta) = fs::symlink_metadata(&old_dest)
             && meta.file_type().is_symlink()
         {
-            state.modal = Some(Modal::Error {
-                msg: format!(
+            state.show_toast(
+                ToastLevel::Error,
+                format!(
                     "Destination is locked by existing symlink: {}. Remove it first with bulk remove (x).",
                     old_dest.display()
                 ),
-            });
+            );
             return Ok(());
         }
     }
@@ -385,17 +387,19 @@ pub fn export_dir() -> PathBuf {
 pub fn open_import_picker(state: &mut AppState) -> Result<()> {
     let dir = export_dir();
     let Ok(read_dir) = fs::read_dir(&dir) else {
-        state.modal = Some(Modal::Error {
-            msg: format!("No export directory found at {}", dir.display()),
-        });
+        state.show_toast(
+            ToastLevel::Warning,
+            format!("No export directory found at {}", dir.display()),
+        );
         return Ok(());
     };
 
     let candidates = sorted_import_candidates(read_dir);
     if candidates.is_empty() {
-        state.modal = Some(Modal::Error {
-            msg: format!("No export files found in {}", dir.display()),
-        });
+        state.show_toast(
+            ToastLevel::Warning,
+            format!("No export files found in {}", dir.display()),
+        );
         return Ok(());
     }
 
@@ -435,9 +439,10 @@ pub fn import_from_path(state: &mut AppState, import_path: &Path) -> Result<()> 
     flatten_visible(state);
     state.update_symlink_statuses()?;
 
-    state.modal = Some(Modal::Error {
-        msg: format!("Imported {}", import_path.display()),
-    });
+    state.show_toast(
+        ToastLevel::Success,
+        format!("Imported {}", import_path.display()),
+    );
     Ok(())
 }
 
@@ -460,9 +465,10 @@ pub fn export_to_path(state: &mut AppState, export_path: &Path) -> Result<()> {
     crate::state::save(state, export_path)?;
     crate::state::save(state, &state.config_path)?;
 
-    state.modal = Some(Modal::Error {
-        msg: format!("Exported current state to {}", export_path.display()),
-    });
+    state.show_toast(
+        ToastLevel::Success,
+        format!("Exported current state to {}", export_path.display()),
+    );
     Ok(())
 }
 

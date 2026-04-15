@@ -1,13 +1,14 @@
 use crate::state::{
     ActionMode, AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus, ThemeStatusLevel,
 };
+use crate::toast::ToastLevel;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
     widgets::{
         Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
-        ScrollbarOrientation, ScrollbarState,
+        ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
 
@@ -36,6 +37,10 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
     if state.modal.is_some() {
         draw_modal(f, state, f.area());
+    }
+
+    if state.toast.is_some() {
+        draw_toast(f, state, f.area());
     }
 }
 
@@ -224,18 +229,6 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
                     .block(
                         Block::default()
                             .title("Overwrite Warning")
-                            .borders(Borders::ALL)
-                            .border_style(state.theme.error)
-                            .style(state.theme.modal),
-                    )
-                    .style(state.theme.modal_text);
-                f.render_widget(text, modal_area);
-            }
-            Modal::Error { msg } => {
-                let text = Paragraph::new(msg.as_str())
-                    .block(
-                        Block::default()
-                            .title("Notice")
                             .borders(Borders::ALL)
                             .border_style(state.theme.error)
                             .style(state.theme.modal),
@@ -439,6 +432,52 @@ Press Esc/F2 to close.",
             }
         }
     }
+}
+
+fn draw_toast(f: &mut Frame, state: &AppState, area: Rect) {
+    let Some(toast) = &state.toast else {
+        return;
+    };
+    if area.width < 8 || area.height < 5 {
+        return;
+    }
+
+    let max_width = area.width.saturating_sub(2).min(50);
+    let longest_line = toast
+        .message
+        .lines()
+        .map(|line| line.chars().count() as u16)
+        .max()
+        .unwrap_or(0);
+    let width = longest_line.saturating_add(4).clamp(24, max_width);
+    let line_count = toast.message.lines().count().max(1) as u16;
+    let height = line_count
+        .saturating_add(2)
+        .clamp(3, area.height.saturating_sub(1).min(7));
+    let x = area.x + area.width.saturating_sub(width).saturating_sub(1);
+    let y = area.y + area.height.saturating_sub(height).saturating_sub(1);
+    let toast_area = Rect::new(x, y, width, height);
+
+    let (title, border_style) = match toast.level {
+        ToastLevel::Info => ("Info", state.theme.info),
+        ToastLevel::Success => ("Success", state.theme.valid),
+        ToastLevel::Warning => ("Warning", state.theme.warning),
+        ToastLevel::Error => ("Error", state.theme.error),
+    };
+
+    let text = Paragraph::new(toast.message.as_str())
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .style(state.theme.modal),
+        )
+        .style(state.theme.modal_text)
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(Clear, toast_area);
+    f.render_widget(text, toast_area);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

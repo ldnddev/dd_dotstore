@@ -75,6 +75,10 @@ impl App {
         handle_key(&mut self.state, key)
     }
 
+    pub fn tick(&mut self) {
+        self.state.clear_expired_toast();
+    }
+
     pub fn reload(&mut self) -> Result<()> {
         self.state.tree = build_tree(&self.state.project_root, &self.state.ignore_patterns);
         flatten_visible(&mut self.state);

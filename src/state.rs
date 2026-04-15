@@ -1,3 +1,4 @@
+use crate::toast::{Toast, ToastLevel};
 use anyhow::{Context, Result, anyhow};
 use ratatui::style::{Color, Modifier, Style};
 use serde::{Deserialize, Serialize};
@@ -94,9 +95,6 @@ pub enum Modal {
     OverwriteWarning {
         conflicts: Vec<Conflict>,
         action_type: BulkAction,
-    },
-    Error {
-        msg: String,
     },
     Search,
     IgnoreEditor {
@@ -652,6 +650,7 @@ pub struct AppState {
     pub status_list_state: ratatui::widgets::ListState,
     pub filter: String,
     pub modal: Option<Modal>,
+    pub toast: Option<Toast>,
     pub history: VecDeque<Action>,
     pub ignore_patterns: Vec<String>,
     pub theme: Theme,
@@ -686,6 +685,16 @@ impl AppState {
         crate::tree::update_symlink_statuses_recursive(&mut self.tree, &self.project_root);
         crate::tree::flatten_visible(self);
         Ok(())
+    }
+
+    pub fn show_toast(&mut self, level: ToastLevel, message: impl Into<String>) {
+        self.toast = Some(Toast::new(level, message));
+    }
+
+    pub fn clear_expired_toast(&mut self) {
+        if self.toast.as_ref().is_some_and(Toast::is_expired) {
+            self.toast = None;
+        }
     }
 }
 

@@ -8,6 +8,7 @@ use dd_dotstore::app::App;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::{self, Write, stdout};
 use std::path::PathBuf;
+use std::time::Duration;
 
 fn main() -> Result<()> {
     match parse_cli(std::env::args().skip(1)) {
@@ -41,9 +42,11 @@ fn run_app(project_root: Option<PathBuf>) -> Result<()> {
     };
 
     loop {
+        app.tick();
         terminal.draw(|f| app.draw(f))?;
 
-        if let Event::Key(key) = event::read()?
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
             && app.handle_key(key)?
         {
             break;

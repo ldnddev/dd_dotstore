@@ -7,11 +7,12 @@ use dd_dotstore::inputs::handle_key;
 use dd_dotstore::state::{
     Action, ActionMode, BrowserState, DirEntry, Modal, NodeKind, ThemeSource, load_theme,
 };
+use dd_dotstore::toast::{TOAST_DURATION, ToastLevel};
 use dd_dotstore::tree::{build_tree, find_node, flatten_visible};
 use ratatui::style::Color;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn temp_path(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -23,6 +24,27 @@ fn temp_path(prefix: &str) -> PathBuf {
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+#[test]
+fn toast_expires_after_five_seconds() {
+    let root = temp_path("dd_dotstore_test_toast_expiry");
+    fs::create_dir_all(&root).expect("create root");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    app.state.show_toast(ToastLevel::Info, "Saved");
+
+    let toast = app.state.toast.as_mut().expect("toast exists");
+    assert_eq!(toast.duration, TOAST_DURATION);
+    toast.created_at = toast
+        .created_at
+        .checked_sub(TOAST_DURATION + Duration::from_millis(1))
+        .expect("rewind toast");
+
+    app.tick();
+    assert!(app.state.toast.is_none());
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -463,7 +485,7 @@ fn modal_import_and_export_picker_key_paths_work() {
 }
 
 #[test]
-fn malformed_import_shows_error_modal_instead_of_failing_key_handler() {
+fn malformed_import_shows_error_toast_instead_of_failing_key_handler() {
     let root = temp_path("dd_dotstore_test_bad_import");
     fs::create_dir_all(&root).expect("create root");
     fs::write(root.join(".profile"), "export PATH=$PATH").expect("write dotfile");
@@ -481,7 +503,11 @@ fn malformed_import_shows_error_modal_instead_of_failing_key_handler() {
         handled.is_ok(),
         "import parse failure should not bubble as key error"
     );
-    assert!(matches!(app.state.modal, Some(Modal::Error { .. })));
+    assert!(app.state.modal.is_none());
+    assert!(matches!(
+        app.state.toast.as_ref().map(|toast| toast.level),
+        Some(ToastLevel::Error)
+    ));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -657,7 +683,10 @@ fn cannot_change_destination_while_existing_symlink_is_present() {
         NodeKind::File { dest } => assert_eq!(dest.as_ref(), Some(&old_dest)),
         NodeKind::Folder { .. } => panic!("expected file"),
     }
-    assert!(matches!(app.state.modal, Some(Modal::Error { .. })));
+    assert!(matches!(
+        app.state.toast.as_ref().map(|toast| toast.level),
+        Some(ToastLevel::Error)
+    ));
     assert!(old_dest.exists());
     assert!(!new_dest.exists());
 

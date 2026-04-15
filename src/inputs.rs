@@ -6,6 +6,7 @@ use crate::actions::{
     import_from_path, open_export_picker, open_import_picker, selected_create_conflicts, undo_last,
 };
 use crate::state::{AppState, BrowserState, BulkAction, Modal, NodeKind};
+use crate::toast::ToastLevel;
 use crate::tree::{find_mut_node, flatten_visible, toggle_expand, toggle_selected};
 use std::path::PathBuf;
 
@@ -273,9 +274,7 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                         } else if let Some(rel_src) = selected_rel_path(state, node_idx) {
                             let dest = browser.current.join(&entry.name);
                             assign_destination(state, &rel_src, dest)?;
-                            if !matches!(state.modal, Some(Modal::Error { .. })) {
-                                state.modal = None;
-                            }
+                            state.modal = None;
                             return Ok(false);
                         }
                     }
@@ -288,9 +287,7 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                             .unwrap_or_else(|| "dotfile".to_string());
                         let dest = browser.current.join(src_name);
                         assign_destination(state, &rel_src, dest)?;
-                        if !matches!(state.modal, Some(Modal::Error { .. })) {
-                            state.modal = None;
-                        }
+                        state.modal = None;
                         return Ok(false);
                     }
                 }
@@ -351,9 +348,6 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             _ => state.modal = None,
         },
 
-        Modal::Error { .. } => {
-            state.modal = None;
-        }
         Modal::Help => match key.code {
             KeyCode::Esc | KeyCode::Enter | KeyCode::F(1) | KeyCode::Char('q') => {
                 state.modal = None;
@@ -379,13 +373,10 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 KeyCode::Enter => {
                     if let Some(path) = files.get(selected) {
                         if let Err(err) = import_from_path(state, path) {
-                            state.modal = Some(Modal::Error {
-                                msg: format!("Import failed: {err}"),
-                            });
+                            state.show_toast(ToastLevel::Error, format!("Import failed: {err}"));
                         }
-                    } else {
-                        state.modal = None;
                     }
+                    state.modal = None;
                     return Ok(false);
                 }
                 KeyCode::Esc => {
@@ -415,6 +406,7 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                     };
                     let path = dir.join(name);
                     export_to_path(state, &path)?;
+                    state.modal = None;
                     return Ok(false);
                 }
                 KeyCode::Esc => {
