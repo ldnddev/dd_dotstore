@@ -71,27 +71,61 @@ pub fn flatten_visible(state: &mut AppState) {
         .map(|c| c.to_ascii_lowercase())
         .collect();
 
-    fn walk(node: &Node, depth: usize, query: &[char], out: &mut Vec<Node>) {
+    fn walk(
+        node: &Node,
+        depth: usize,
+        query: &[char],
+        prefix: &str,
+        is_last: bool,
+        out: &mut Vec<Node>,
+    ) {
         let matches = query.is_empty() || fuzzy_match(&node.name, query);
         if matches || matches!(node.kind, NodeKind::Folder { .. }) {
             let mut display = node.clone();
-            display.name = format!("{}{}", "  ".repeat(depth), node.name);
+            let connector = if depth == 0 {
+                ""
+            } else if is_last {
+                "└─ "
+            } else {
+                "├─ "
+            };
+            let continuation = if depth == 0 {
+                ""
+            } else if is_last {
+                "   "
+            } else {
+                "│  "
+            };
+            let tree_part = format!("{}{}", prefix, connector);
+            display.name = format!("{}{}", tree_part, node.name);
             out.push(display);
-        }
 
-        if let NodeKind::Folder {
-            children, expanded, ..
-        } = &node.kind
-            && *expanded
-        {
-            for child in children {
-                walk(child, depth + 1, query, out);
+            let next_prefix = format!("{}{}", prefix, continuation);
+
+            if let NodeKind::Folder {
+                children, expanded, ..
+            } = &node.kind
+                && *expanded
+            {
+                // Determine visible children among the rendered list (match or folders for hierarchy under filter)
+                let visible_children: Vec<&Node> = children
+                    .iter()
+                    .filter(|c| {
+                        let c_matches = query.is_empty() || fuzzy_match(&c.name, query);
+                        c_matches || matches!(c.kind, NodeKind::Folder { .. })
+                    })
+                    .collect();
+
+                for (i, child) in visible_children.iter().enumerate() {
+                    let child_is_last = i == visible_children.len() - 1;
+                    walk(child, depth + 1, query, &next_prefix, child_is_last, out);
+                }
             }
         }
     }
 
     for node in &state.tree {
-        walk(node, 0, &filter_query, &mut state.nodes);
+        walk(node, 0, &filter_query, "", true, &mut state.nodes);
     }
 
     if state.nodes.is_empty() {
@@ -213,5 +247,28 @@ pub fn toggle_expand(state: &mut AppState, rel_path: &Path) {
 pub fn toggle_selected(state: &mut AppState, rel_path: &Path) {
     if let Some(node) = find_mut_node(&mut state.tree, rel_path) {
         node.selected = !node.selected;
+    }
+}
+
+/// Expands all ancestor folders for the given relative path so that the target
+/// becomes visible in the flattened nodes list. Used for auto-expand on
+/// right-panel clicks.
+pub fn expand_ancestors(state: &mut AppState, rel_path: &Path) {
+    let mut ancestors: Vec<PathBuf> = Vec::new();
+    let mut current = rel_path.to_path_buf();
+    while let Some(parent) = current.parent() {
+        if parent == Path::new("") || parent.as_os_str().is_empty() {
+            break;
+        }
+        ancestors.push(parent.to_path_buf());
+        current = parent.to_path_buf();
+    }
+    ancestors.reverse();
+    for anc in ancestors {
+        if let Some(node) = find_mut_node(&mut state.tree, &anc)
+            && let NodeKind::Folder { expanded, .. } = &mut node.kind
+        {
+            *expanded = true;
+        }
     }
 }

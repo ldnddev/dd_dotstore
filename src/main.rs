@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::{
     ExecutableCommand,
-    event::{self, Event},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use dd_dotstore::app::App;
@@ -31,6 +31,7 @@ fn main() -> Result<()> {
 fn run_app(project_root: Option<PathBuf>) -> Result<()> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
+    let _ = stdout().execute(EnableMouseCapture);
 
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
@@ -45,17 +46,30 @@ fn run_app(project_root: Option<PathBuf>) -> Result<()> {
         app.tick();
         terminal.draw(|f| app.draw(f))?;
 
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-            && app.handle_key(key)?
-        {
-            break;
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if app.handle_key(key)? {
+                        break;
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    if app.handle_mouse(mouse)? {
+                        break;
+                    }
+                }
+                Event::Resize(_, _) => {
+                    // Next draw iteration will handle the new size
+                }
+                _ => {}
+            }
         }
     }
 
     let _ = app.save();
-    disable_raw_mode()?;
-    stdout().execute(LeaveAlternateScreen)?;
+    let _ = stdout().execute(DisableMouseCapture);
+    let _ = stdout().execute(LeaveAlternateScreen);
+    let _ = disable_raw_mode();
     Ok(())
 }
 

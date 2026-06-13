@@ -247,9 +247,9 @@ pub fn confirm_bulk_with_overwrite(
             BulkAction::Create => {
                 let fallback = state.project_root.join(".linked").join(&rel);
                 let (dest, action_mode) = find_mut_node(&mut state.tree, &rel)
-                    .and_then(|n| match &n.kind {
-                        NodeKind::File { dest } => Some((dest.clone(), n.action_mode)),
-                        NodeKind::Folder { dest, .. } => Some((dest.clone(), n.action_mode)),
+                    .map(|n| match &n.kind {
+                        NodeKind::File { dest } => (dest.clone(), n.action_mode),
+                        NodeKind::Folder { dest, .. } => (dest.clone(), n.action_mode),
                     })
                     .map(|(dest, action_mode)| (dest.unwrap_or(fallback.clone()), action_mode))
                     .unwrap_or((fallback, ActionMode::Symlink));
@@ -281,6 +281,74 @@ pub fn confirm_bulk_with_overwrite(
 
     flatten_visible(state);
     Ok(())
+}
+
+/// Collect human-readable preview lines for what a bulk action would do.
+/// Used for safety/preview/dry-run modals.
+pub fn collect_preview_lines(state: &AppState, action: BulkAction) -> Vec<String> {
+    let selected: Vec<_> = state
+        .nodes
+        .iter()
+        .filter(|n| n.selected)
+        .collect();
+
+    if selected.is_empty() {
+        return vec!["(no items selected)".to_string()];
+    }
+
+    let mut lines = Vec::new();
+
+    for node in &selected {
+        match action {
+            BulkAction::Create => {
+                let fallback = state.project_root.join(".linked").join(&node.path);
+                let (dest, mode) = match &node.kind {
+                    NodeKind::File { dest } => (dest.clone().unwrap_or(fallback.clone()), node.action_mode),
+                    NodeKind::Folder { dest, .. } => (dest.clone().unwrap_or(fallback.clone()), node.action_mode),
+                };
+                let arrow = if mode == ActionMode::Symlink { "->" } else { "=>" };
+                let mut line = format!(
+                    "{} {} {} {}",
+                    mode.label(),
+                    node.path.display(),
+                    arrow,
+                    dest.display()
+                );
+                // Simple conflict note (real non-symlink for create)
+                if let Ok(meta) = fs::symlink_metadata(&dest)
+                    && !meta.file_type().is_symlink()
+                {
+                    line.push_str("  [OVERWRITE REAL FILE]");
+                }
+                lines.push(line);
+            }
+            BulkAction::Remove => {
+                if let Some(d) = match &node.kind {
+                    NodeKind::File { dest } => dest.clone(),
+                    NodeKind::Folder { dest, .. } => dest.clone(),
+                } {
+                    let arrow = if node.action_mode == ActionMode::Symlink { "->" } else { "=>" };
+                    lines.push(format!(
+                        "REMOVE {} {} {} {}",
+                        node.action_mode.label(),
+                        node.path.display(),
+                        arrow,
+                        d.display()
+                    ));
+                } else {
+                    lines.push(format!("REMOVE (no dest) {}", node.path.display()));
+                }
+            }
+        }
+    }
+
+    if lines.len() > 8 {
+        let extra = lines.len() - 8;
+        lines.truncate(8);
+        lines.push(format!("... +{} more", extra));
+    }
+
+    lines
 }
 
 pub fn selected_create_conflicts(state: &AppState) -> Vec<Conflict> {

@@ -1,10 +1,12 @@
 use crate::toast::{Toast, ToastLevel};
 use anyhow::{Context, Result, anyhow};
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -90,6 +92,9 @@ pub enum Modal {
         browser: BrowserState,
     },
     ConfirmBulk {
+        action: BulkAction,
+    },
+    PreviewBulk {
         action: BulkAction,
     },
     OverwriteWarning {
@@ -658,6 +663,16 @@ pub struct AppState {
     pub persisted_symlinks: HashMap<String, String>,
     pub persisted_modes: HashMap<String, ActionMode>,
     pub theme_status: ThemeStatus,
+    // Mouse support areas (updated every draw for hit-testing) and transient drag/click state
+    pub last_frame_area: Rect,
+    pub source_area: Rect,
+    pub status_area: Rect,
+    pub current_modal_area: Option<Rect>,
+    pub toast_area: Option<Rect>,
+    pub scrollbar_dragging: bool,
+    pub last_mouse_click_pos: Option<(u16, u16, Instant)>,
+    // Parallel list of source paths for the Destinations panel lines (for click-to-jump)
+    pub destination_paths: Vec<PathBuf>,
 }
 
 impl AppState {
