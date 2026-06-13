@@ -1,3 +1,28 @@
+## dd_dotstore v1.1.0
+
+### Highlights
+- Full mouse support:
+  - Click to highlight, far-left zone to toggle multi-select, tree area to expand/collapse folders.
+  - Double-click on name to open destination editor.
+  - Scroll wheel over source list or Destinations panel (Shift = faster scroll).
+  - Drag/click on scrollbars (now present on both main panels).
+  - Shift+click for range multi-select on source.
+  - Click Destinations panel entries to jump focus (auto-expands ancestor folders as needed).
+  - Click outside modals to cancel; click toasts to dismiss.
+- UI polish and information density:
+  - Proper Unicode tree structure (├─ └─ │  ) instead of simple indents.
+  - Counts in titles: Source shows `[X selected / Y]`, Destinations shows total count.
+  - Destinations (right) panel is now fully interactive with its own scrollbar and mouse navigation.
+  - Folder "●" badges indicating subtrees with configured destinations.
+  - Enhanced icons (e.g. ◌ for folders with linked descendants).
+- Safety / preview / dry-run:
+  - New `p` key opens a detailed **Preview / dry-run** modal listing the exact planned bulk create operations (with dests, modes, and overwrite notes) before any changes.
+  - Both Preview and Confirm modals now render the concrete plan (src → dest) for review.
+  - Y from preview proceeds to actual apply; any other key safely closes with zero side effects.
+- Other:
+  - Auto-expand on right-panel navigation.
+  - Numerous small robustness and UX fixes from the mouse-control work.
+
 ## dd_dotstore v1.0.0
 
 First public release of `dd_dotstore`, a terminal UI for managing dotfile symlinks with safer bulk operations and persistent state.
