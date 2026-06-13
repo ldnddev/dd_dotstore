@@ -11,8 +11,16 @@ use ratatui::{
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
+use std::path::PathBuf;
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
+    state.last_frame_area = f.area();
+    if state.toast.is_none() {
+        state.toast_area = None;
+    }
+    if state.modal.is_none() {
+        state.current_modal_area = None;
+    }
     f.render_widget(Block::default().style(state.theme.app_shell), f.area());
 
     let outer = Layout::default()
@@ -65,24 +73,44 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
             Span::styled("Theme status: ", state.theme.label),
             Span::styled(state.theme_status.message.as_str(), theme_status_style),
         ]),
-        Line::from("F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit"),
+        Line::from("F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit   (mouse + tree polish)"),
     ])
     .block(Block::default())
     .style(state.theme.app_shell);
     f.render_widget(bar, area);
 }
 
+fn subtree_has_destination(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::File { dest: Some(_) } | NodeKind::Folder { dest: Some(_), .. } => true,
+        NodeKind::Folder { children, .. } => children.iter().any(subtree_has_destination),
+        _ => false,
+    }
+}
+
 fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
+    state.source_area = area;
     let items: Vec<ListItem<'_>> = state
         .nodes
         .iter()
         .map(|node| {
-            let (icon, icon_style) = match node.symlink_status {
-                SymlinkStatus::Valid => ("✓ ", state.theme.valid),
-                SymlinkStatus::Broken => ("✗ ", state.theme.broken),
-                SymlinkStatus::Unknown => ("? ", state.theme.highlight),
-                SymlinkStatus::None => ("  ", state.theme.normal),
+            let mut icon = match node.symlink_status {
+                SymlinkStatus::Valid => "✓ ",
+                SymlinkStatus::Broken => "✗ ",
+                SymlinkStatus::Unknown => "? ",
+                SymlinkStatus::None => "  ",
             };
+            let mut icon_style = match node.symlink_status {
+                SymlinkStatus::Valid => state.theme.valid,
+                SymlinkStatus::Broken => state.theme.broken,
+                SymlinkStatus::Unknown => state.theme.highlight,
+                SymlinkStatus::None => state.theme.normal,
+            };
+            // Enhanced visibility: folders containing configured descendants get a subtle badge icon
+            if matches!(&node.kind, NodeKind::Folder { dest: None, .. }) && subtree_has_destination(node) && node.symlink_status == SymlinkStatus::None {
+                icon = "◌ ";
+                icon_style = state.theme.secondary;
+            }
 
             let prefix = if node.selected { "[✓] " } else { "[ ] " };
             let mode_style = match node.action_mode {
@@ -90,16 +118,14 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
                 ActionMode::Copy => state.theme.highlight,
             };
 
-            let (name, name_style) = match &node.kind {
-                NodeKind::Folder { expanded, .. } => {
-                    if *expanded {
-                        (format!("> {}", node.name), state.theme.folder)
-                    } else {
-                        (format!("+ {}", node.name), state.theme.folder)
-                    }
-                }
+            let (mut name, name_style) = match &node.kind {
+                NodeKind::Folder { .. } => (node.name.clone(), state.theme.folder),
                 _ => (node.name.clone(), state.theme.file),
             };
+            // Badge for folders that have (grand)children with destinations configured (information density)
+            if matches!(&node.kind, NodeKind::Folder { dest: None, .. }) && subtree_has_destination(node) {
+                name.push_str(" ●");
+            }
 
             let content = Line::from(vec![
                 Span::styled(prefix, state.theme.normal),
@@ -112,10 +138,17 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         })
         .collect();
 
-    let title = if state.filter.is_empty() {
+    let total = state.nodes.len();
+    let selected_count = state.nodes.iter().filter(|n| n.selected).count();
+    let base_title = if state.filter.is_empty() {
         "Source".to_string()
     } else {
         format!("Source (filter: {})", state.filter)
+    };
+    let title = if selected_count > 0 {
+        format!("{}  [{} selected / {}]", base_title, selected_count, total)
+    } else {
+        format!("{}  [{}]", base_title, total)
     };
 
     let list = List::new(items)
@@ -129,12 +162,33 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
         .highlight_style(state.theme.selected);
 
     f.render_stateful_widget(list, area, &mut state.list_state);
+
+    // Render scrollbar on the right edge when content overflows (supports mouse drag to scroll)
+    let total = state.nodes.len();
+    let view_rows = area.height.saturating_sub(2) as usize;
+    if total > view_rows && view_rows > 0 {
+        let mut scrollbar_state = ScrollbarState::new(total)
+            .position(state.list_state.offset())
+            .viewport_content_length(view_rows);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .thumb_style(state.theme.scrollbar);
+        f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
 }
 
 fn draw_status_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
+    state.status_area = area;
     let mut lines: Vec<Line<'_>> = vec![];
+    state.destination_paths.clear();
 
-    fn collect_destinations<'a>(node: &Node, out: &mut Vec<Line<'a>>, theme: &crate::state::Theme) {
+    fn collect_destinations<'a>(
+        node: &Node,
+        out: &mut Vec<Line<'a>>,
+        paths: &mut Vec<PathBuf>,
+        theme: &crate::state::Theme,
+    ) {
         match &node.kind {
             NodeKind::File { dest: Some(d) } | NodeKind::Folder { dest: Some(d), .. } => {
                 let arrow = match node.action_mode {
@@ -157,55 +211,94 @@ fn draw_status_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
                     Span::raw(format!(" {arrow} ")),
                     Span::styled(d.display().to_string(), mode_style),
                 ]));
+                paths.push(node.path.clone());
             }
             NodeKind::File { dest: None } | NodeKind::Folder { dest: None, .. } => {}
         }
         if let NodeKind::Folder { children, .. } = &node.kind {
             for c in children {
-                collect_destinations(c, out, theme);
+                collect_destinations(c, out, paths, theme);
             }
         }
     }
 
     for node in &state.tree {
-        collect_destinations(node, &mut lines, &state.theme);
+        collect_destinations(node, &mut lines, &mut state.destination_paths, &state.theme);
     }
+
+    let dest_count = lines.len();
+    let title = format!("Destinations ({})", dest_count);
 
     let items: Vec<ListItem<'_>> = lines.into_iter().map(ListItem::new).collect();
 
     let list = List::new(items).block(
         Block::default()
-            .title("Destinations")
+            .title(title)
             .borders(Borders::ALL)
             .border_style(state.theme.border)
             .style(state.theme.body),
     );
 
     f.render_stateful_widget(list, area, &mut state.status_list_state);
+
+    // Add scrollbar for the destinations panel (information density + mouse drag support)
+    let total = dest_count;
+    let view_rows = area.height.saturating_sub(2) as usize;
+    if total > view_rows && view_rows > 0 {
+        let mut scrollbar_state = ScrollbarState::new(total)
+            .position(state.status_list_state.offset())
+            .viewport_content_length(view_rows);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .thumb_style(state.theme.scrollbar);
+        f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
 }
 
-fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
+fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
     let modal_area = centered_rect(70, 60, area);
+    state.current_modal_area = Some(modal_area);
     f.render_widget(Clear, modal_area);
 
     if let Some(modal) = &state.modal {
         match modal {
             Modal::ConfirmBulk { action } => {
                 let title = match action {
-                    BulkAction::Create => "Apply selected items?",
-                    BulkAction::Remove => "Remove selected destinations?",
+                    BulkAction::Create => "Confirm: Apply selected?",
+                    BulkAction::Remove => "Confirm: Remove selected?",
                 };
-                let text = Paragraph::new(
-                    "Use the LINK/COPY labels shown in Source.\nY/Enter = yes, any other key = cancel",
-                )
-                .block(
-                    Block::default()
-                        .title(title)
-                        .borders(Borders::ALL)
-                        .border_style(state.theme.active_border)
-                        .style(state.theme.modal),
-                )
-                .style(state.theme.modal_text);
+                let preview = crate::actions::collect_preview_lines(state, *action);
+                let mut body = preview.join("\n");
+                body.push_str("\n\nY/Enter = proceed, other = cancel (safety preview)");
+                let text = Paragraph::new(body)
+                    .block(
+                        Block::default()
+                            .title(title)
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.active_border)
+                            .style(state.theme.modal),
+                    )
+                    .style(state.theme.modal_text);
+                f.render_widget(text, modal_area);
+            }
+            Modal::PreviewBulk { action } => {
+                let title = match action {
+                    BulkAction::Create => "PREVIEW: Planned CREATE (dry-run)",
+                    BulkAction::Remove => "PREVIEW: Planned REMOVE (dry-run)",
+                };
+                let preview = crate::actions::collect_preview_lines(state, *action);
+                let mut body = preview.join("\n");
+                body.push_str("\n\nThis is a DRY RUN / safety preview.\nY/Enter = actually apply now, other key = close (no changes)");
+                let text = Paragraph::new(body)
+                    .block(
+                        Block::default()
+                            .title(title)
+                            .borders(Borders::ALL)
+                            .border_style(state.theme.active_border)
+                            .style(state.theme.modal),
+                    )
+                    .style(state.theme.modal_text);
                 f.render_widget(text, modal_area);
             }
             Modal::OverwriteWarning { conflicts, .. } => {
@@ -276,7 +369,7 @@ fn draw_modal(f: &mut Frame, state: &AppState, area: Rect) {
                     })
                     .collect();
                 let title = format!(
-                    "Edit Destination: {} | filter: {} (type to fuzzy filter, g/G/~, Ctrl+S: use dir)",
+                    "Edit Destination: {} | filter: {} (type fuzzy, g/G/~, Ctrl+S, click/dbl-click, scrollbar drag)",
                     browser.current.display(),
                     if browser.filter.is_empty() {
                         "<none>"
@@ -335,8 +428,9 @@ Space        Toggle selection (file/folder)\n\
 Enter        Edit destination (file/folder)\n\
 e            Edit destination (file/folder)\n\
 h/l or ←/→   Collapse/expand folder\n\
-s            Apply selected LINK/COPY items\n\
-x            Remove selected destinations\n\
+s            Apply selected (confirm)\n\
+x            Remove selected (confirm)\n\
+p            Preview/dry-run plan for apply (Y to proceed)\n\
 m            Toggle LINK/COPY for highlighted item\n\
 M            Set selected items to the next LINK/COPY mode\n\
 u            Undo last action\n\
@@ -344,7 +438,22 @@ u            Undo last action\n\
 r            Reload tree\n\
 I            Ignore editor\n\
 i            Import picker\n\
-E            Export picker\n";
+E            Export picker\n\
+\n\
+Mouse\n\
+Click row           Highlight\n\
+Far-left click      Toggle [ ] select\n\
+Click tree area     Toggle expand (folders)\n\
+Shift+click         Range multi-select from current to clicked\n\
+Double-click name   Edit destination\n\
+Wheel over list     Scroll source (Shift=faster)\n\
+Wheel over right    Scroll Destinations\n\
+Drag right scrollbar Scroll the view\n\
+Click right panel   Jump focus + auto-expand ancestors\n\
+Click outside modal Close it\n\
+Browser: click moves, double-click picks, scrollbar drag works\n\
+\n\
+Tree: proper connectors (├ └ │) + counts + subtree badges (●) for density.";
                 let text = Paragraph::new(help)
                     .block(
                         Block::default()
@@ -406,7 +515,7 @@ Press Esc/F2 to close.",
                 let list = List::new(items)
                     .block(
                         Block::default()
-                            .title("Import Picker (newest first; j/k, Enter, Esc)")
+                            .title("Import Picker (newest first; j/k/click, Enter, Esc)")
                             .borders(Borders::ALL)
                             .border_style(state.theme.active_border)
                             .style(state.theme.modal),
@@ -434,11 +543,13 @@ Press Esc/F2 to close.",
     }
 }
 
-fn draw_toast(f: &mut Frame, state: &AppState, area: Rect) {
+fn draw_toast(f: &mut Frame, state: &mut AppState, area: Rect) {
     let Some(toast) = &state.toast else {
+        state.toast_area = None;
         return;
     };
     if area.width < 8 || area.height < 5 {
+        state.toast_area = None;
         return;
     }
 
@@ -457,6 +568,7 @@ fn draw_toast(f: &mut Frame, state: &AppState, area: Rect) {
     let x = area.x + area.width.saturating_sub(width).saturating_sub(1);
     let y = area.y + area.height.saturating_sub(height).saturating_sub(1);
     let toast_area = Rect::new(x, y, width, height);
+    state.toast_area = Some(toast_area);
 
     let (title, border_style) = match toast.level {
         ToastLevel::Info => ("Info", state.theme.info),

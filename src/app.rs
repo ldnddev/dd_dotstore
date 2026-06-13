@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::Frame;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    inputs::handle_key,
+    inputs::{handle_key, handle_mouse},
     state::{Action, AppState, Theme, ThemeStatus, load, load_theme, save},
     tree::{build_tree, flatten_visible, set_action_mode, set_dest},
     ui::draw,
@@ -73,6 +73,10 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Result<bool> {
         handle_key(&mut self.state, key)
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Result<bool> {
+        handle_mouse(&mut self.state, mouse)
     }
 
     pub fn tick(&mut self) {

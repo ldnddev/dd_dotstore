@@ -34,6 +34,7 @@ e               Edit destination (file/folder)
 h/l or ←/→      Collapse/expand folder
 s               Apply selected LINK/COPY items (confirm)
 x               Remove selected destinations (confirm)
+p               Preview / dry-run the planned bulk create (shows detailed plan; Y to actually apply)
 m               Toggle LINK/COPY for highlighted item
 M               Set selected items to the next LINK/COPY mode
 u               Undo last action
@@ -50,6 +51,25 @@ i / E           Import / Export config
 - y             Confirm bulk action
 - Delete / d    Remove ignore pattern (in editor)
 - Destination browser: type for fuzzy filter, `Ctrl+U` clear, `~` home, `g/G` jump, `PgUp/PgDn` scroll, `Ctrl+S` select current dir
+
+**Mouse controls**
+- Click a row: move highlight cursor
+- Far-left click on a row (the `[ ]` area): toggle multi-select checkbox (matches Space)
+- Click the tree connector area on folders: toggle expand/collapse
+- Shift+click a row: range multi-select (sets checkboxes from current highlight to clicked)
+- Double-click the name part of a row: open destination editor (activate)
+- Scroll wheel while mouse is over the source list: scroll the view (Shift = faster)
+- Scroll wheel while mouse is over the right Destinations panel: scroll it
+- Click or drag on the scrollbar (right edge of source or Destinations panel): scroll the view
+- Click an entry in the right Destinations panel: jump highlight to the matching item in the source tree (auto-expands ancestors if needed)
+- Folders in source tree show "●" badge if they contain configured descendants (even if not directly linked)
+- Enhanced status icons (◌ for folders with subtree destinations)
+- In the destination browser modal: click to move highlight, double-click name to pick/enter a dir, drag or click its scrollbar to scroll the picker list
+- Click outside an open modal: close/cancel the modal
+- Click a toast: dismiss it immediately
+- Import picker: click a row to choose it (press Enter to confirm the import)
+
+Additional polish: Source and Destinations titles show selection/total counts; source tree uses proper Unicode connectors (├ └ │) for better structure visibility.
 
 Passive notices do not require input. They appear as toasts in the bottom-right corner and disappear after 5 seconds.
 
