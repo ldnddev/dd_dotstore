@@ -1,5 +1,5 @@
 use crate::state::{
-    ActionMode, AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus, ThemeStatusLevel,
+    ActionMode, AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus,
 };
 use crate::toast::ToastLevel;
 use ratatui::{
@@ -12,6 +12,7 @@ use ratatui::{
     },
 };
 use std::path::PathBuf;
+
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
     state.last_frame_area = f.area();
@@ -28,7 +29,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(2),
+            Constraint::Length(1),  // footer is now just the key hints line (decluttered)
         ])
         .split(f.area());
 
@@ -36,7 +37,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(outer[1]);
 
     draw_source_panel(f, state, chunks[0]);
@@ -64,19 +65,19 @@ fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
-    let theme_status_style = match state.theme_status.level {
-        ThemeStatusLevel::Healthy => state.theme.info,
-        ThemeStatusLevel::Warning => state.theme.warning,
+    // Width-adaptive key hints (footer reduced to 1 line; theme status moved out of persistent footer
+    // to reduce clutter — full details still in F2 Credits and at startup).
+    let keys = if area.width < 75 {
+        "F1:Help  q:Quit  j/k:Nav  Spc:Sel  s:Apply  x:Rem  /:Filter"
+    } else if area.width < 110 {
+        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit"
+    } else {
+        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit   (mouse: click/scroll/drag)"
     };
-    let bar = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("Theme status: ", state.theme.label),
-            Span::styled(state.theme_status.message.as_str(), theme_status_style),
-        ]),
-        Line::from("F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit   (mouse + tree polish)"),
-    ])
-    .block(Block::default())
-    .style(state.theme.app_shell);
+
+    let bar = Paragraph::new(Line::from(keys))
+        .block(Block::default())
+        .style(state.theme.app_shell);
     f.render_widget(bar, area);
 }
 
