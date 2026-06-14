@@ -510,7 +510,7 @@ fn handle_main_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
             let delta: usize = if mouse.modifiers.contains(KeyModifiers::SHIFT) { 8 } else { 3 };
             if rect_contains(state.source_area, mouse.column, mouse.row) {
-                // Wheel on source (original behavior)
+                // Wheel on source
                 if state.nodes.is_empty() {
                     return Ok(false);
                 }
@@ -586,57 +586,57 @@ fn handle_main_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                 return Ok(false);
             }
 
-            if rect_contains(state.source_area, mouse.column, mouse.row) {
-                if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                    // Double-click detection (only counts on name part later)
-                    let now = Instant::now();
-                    let is_double = if let Some((lx, ly, lt)) = state.last_mouse_click_pos {
-                        lx == mouse.column && ly == mouse.row && now.duration_since(lt).as_millis() < 420
-                    } else {
-                        false
-                    };
-                    state.last_mouse_click_pos = Some((mouse.column, mouse.row, now));
+            if rect_contains(state.source_area, mouse.column, mouse.row)
+                && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            {
+                // Double-click detection (only counts on name part later)
+                let now = Instant::now();
+                let is_double = if let Some((lx, ly, lt)) = state.last_mouse_click_pos {
+                    lx == mouse.column && ly == mouse.row && now.duration_since(lt).as_millis() < 420
+                } else {
+                    false
+                };
+                state.last_mouse_click_pos = Some((mouse.column, mouse.row, now));
 
-                    let (maybe_idx, is_name_part) = hit_test_source_row(state, mouse.column, mouse.row);
-                    if let Some(idx) = maybe_idx {
-                        // Always move the highlight cursor
-                        state.list_state.select(Some(idx));
+                let (maybe_idx, is_name_part) = hit_test_source_row(state, mouse.column, mouse.row);
+                if let Some(idx) = maybe_idx {
+                    // Always move the highlight cursor
+                    state.list_state.select(Some(idx));
 
-                        // Range select via Shift+click (polish feature)
-                        if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-                            if let Some(cur) = state.list_state.selected() {
-                                let start = cur.min(idx);
-                                let end = cur.max(idx);
-                                for i in start..=end {
-                                    if let Some(n) = state.nodes.get(i) {
-                                        let p = n.path.clone();
-                                        if let Some(node) = find_mut_node(&mut state.tree, &p) {
-                                            node.selected = true;
-                                        }
+                    // Range select via Shift+click (polish feature)
+                    if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                        if let Some(cur) = state.list_state.selected() {
+                            let start = cur.min(idx);
+                            let end = cur.max(idx);
+                            for i in start..=end {
+                                if let Some(n) = state.nodes.get(i) {
+                                    let p = n.path.clone();
+                                    if let Some(node) = find_mut_node(&mut state.tree, &p) {
+                                        node.selected = true;
                                     }
                                 }
-                                flatten_visible(state);
-                                // Re-clamp the highlight (flatten rarely changes indices for pure select-range on visible items)
-                                state.list_state.select(Some(idx.min(state.nodes.len().saturating_sub(1))));
                             }
-                            // Skip other zone actions for shift range
-                        } else {
-                            let rel_x = compute_rel_x(state, mouse.column);
-                            let is_checkbox = rel_x < 4;
-
-                            if is_checkbox {
-                                toggle_selection_at(state, idx);
-                            } else if is_folder_glyph(state, idx, rel_x) {
-                                toggle_expand_at(state, idx);
-                            } else if is_double && is_name_part {
-                                // Double click only on the name (per spec)
-                                open_dest_browser_for(state, idx);
-                            }
-                            // Single click on name/glyph area: just the select we did above. Good.
+                            flatten_visible(state);
+                            // Re-clamp the highlight (flatten rarely changes indices for pure select-range on visible items)
+                            state.list_state.select(Some(idx.min(state.nodes.len().saturating_sub(1))));
                         }
+                        // Skip other zone actions for shift range
+                    } else {
+                        let rel_x = compute_rel_x(state, mouse.column);
+                        let is_checkbox = rel_x < 4;
+
+                        if is_checkbox {
+                            toggle_selection_at(state, idx);
+                        } else if is_folder_glyph(state, idx, rel_x) {
+                            toggle_expand_at(state, idx);
+                        } else if is_double && is_name_part {
+                            // Double click only on the name (per spec)
+                            open_dest_browser_for(state, idx);
+                        }
+                        // Single click on name/glyph area: just the select we did above. Good.
                     }
                 }
-                // Drag on normal list rows (non-scrollbar): ignore per spec (drag = scrollbar)
+                // (no else for drag comment here, as drag is handled before this if)
             } else if rect_contains(state.status_area, mouse.column, mouse.row) {
                 // Click in Destinations panel: jump highlight to the corresponding source item (polish + navigation)
                 if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
