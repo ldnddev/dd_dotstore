@@ -366,6 +366,7 @@ pub struct Theme {
     pub source: ThemeSource,
     pub version: u64,
     pub colors: ThemeColors,
+    pub header_quotes: Vec<String>,
     pub app_shell: Style,
     pub body: Style,
     pub modal: Style,
@@ -402,6 +403,7 @@ impl Theme {
             source,
             version,
             colors,
+            header_quotes: vec![],
             app_shell: Style::default()
                 .fg(colors.text_primary)
                 .bg(colors.base_background),
@@ -477,16 +479,29 @@ impl Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Self::from_colors(
+        let mut theme = Self::from_colors(
             ThemeColors::default(),
             ThemeSource::Default,
             SUPPORTED_THEME_VERSION,
-        )
+        );
+        theme.header_quotes = DEFAULT_HEADER_QUOTES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        theme
     }
 }
 
 const THEME_FILE_NAME: &str = "dd_dotstore_theme.yml";
 const SUPPORTED_THEME_VERSION: u64 = 1;
+
+const DEFAULT_HEADER_QUOTES: [&'static str; 5] = [
+    "Don't Fear the . (Dot) - Tame It.",
+    ". (Dot) file Domination done right.",
+    ". (Dot) file management fatigue is real. Or used to be.",
+    ". (Dot) file sync setup in seconds - okay, fast.",
+    ". (Dot) file management for the Ricer at heart.",
+];
 
 pub fn load_theme(project_root: &Path) -> Result<Theme> {
     let local = project_root.join(THEME_FILE_NAME);
@@ -520,7 +535,16 @@ fn load_theme_file(path: &Path, source: ThemeSource) -> Result<Theme> {
     }
     let colors = parse_theme_colors(&content)
         .with_context(|| format!("Failed to parse theme file: {}", path.display()))?;
-    Ok(Theme::from_colors(colors, source, version))
+    let mut header_quotes = parse_header_quotes(&content);
+    if header_quotes.is_empty() {
+        header_quotes = DEFAULT_HEADER_QUOTES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+    }
+    let mut theme = Theme::from_colors(colors, source, version);
+    theme.header_quotes = header_quotes;
+    Ok(theme)
 }
 
 fn parse_theme_version(content: &str) -> Result<u64> {
@@ -626,6 +650,47 @@ fn extract_yaml_string_value(raw: &str) -> Option<&str> {
         return rest.split_once('\'').map(|(value, _)| value);
     }
     raw.split_whitespace().next()
+}
+
+fn parse_header_quotes(content: &str) -> Vec<String> {
+    let mut quotes: Vec<String> = Vec::new();
+    let mut in_quotes_section = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "header_quotes:" {
+            in_quotes_section = true;
+            continue;
+        }
+        if in_quotes_section {
+            if !line.starts_with(' ') && !line.starts_with('\t') {
+                break; // end of section
+            }
+            // Handle YAML list items like: - "quote here"
+            let item = if let Some(rest) = trimmed.strip_prefix("- ") {
+                rest.trim()
+            } else if let Some(rest) = trimmed.strip_prefix("-") {
+                rest.trim()
+            } else {
+                trimmed
+            };
+            let value = if item.starts_with('"') || item.starts_with('\'') {
+                extract_yaml_string_value(item)
+            } else {
+                // unquoted, take whole as value (for simplicity, assume no inline comments)
+                Some(item)
+            };
+            if let Some(v) = value {
+                if !v.is_empty() {
+                    quotes.push(v.to_string());
+                }
+            }
+        }
+    }
+    quotes
 }
 
 fn parse_hex_color(key: &str, value: &str) -> Result<Color> {

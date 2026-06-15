@@ -12,7 +12,7 @@ All new ldnddev TUI apps (e.g. dd_dotstore, dd_ftp, etc.) **must** follow this s
 
 2. Pick your app's name (e.g. `dd_ftp`) and consistently use it for theme files, titles, etc.
 
-3. Implement the shell layout first: fixed 3-line header with random tagline, 1-line adaptive footer, using `app_shell` and `active_border` from the theme.
+3. Implement the shell layout first: fixed 3-line header with random tagline (customizable via `header_quotes` in theme), 1-line adaptive footer, using `app_shell` and `active_border` from the theme.
 
 4. Implement the Source panel (or equivalent folder navigation) using the exact `Node`/`NodeKind` model, `build_tree` + `flatten_visible` logic (with Unicode tree prefixes), rendering structure (checkbox + icon + mode + name + badges), title with counts, and full keyboard + mouse interaction (zones, shift-range, scrollbar drag, double-click, etc.).
 
@@ -20,7 +20,7 @@ All new ldnddev TUI apps (e.g. dd_dotstore, dd_ftp, etc.) **must** follow this s
 
 6. Map all UI elements to the canonical theme tokens (do not invent new ones).
 
-7. Port the header tagline randomization and width-adaptive key hints.
+7. Port the header tagline randomization (supporting `header_quotes` override from theme) and width-adaptive key hints.
 
 8. Populate F1 Help with the full key + mouse reference, and F2 Credits with theme source/status.
 
@@ -92,7 +92,18 @@ colors:
   folders: "#64B4F5"
   files: "#FFAF46"
   links: "#FFA087"
+
+### Header Quotes (optional, top-level)
+```yaml
+header_quotes:
+  - "Your first witty tagline."
+  - "Second one here."
+  # ... up to as many as you like
 ```
+
+- If present and non-empty, these replace the built-in defaults for the rotating header banner.
+- Strings should be short (single line).
+- If omitted, the app's built-in defaults are used (see app source for current list).
 
 ### Strict Mapping Rules
 
@@ -168,18 +179,26 @@ let outer = Layout::default()
 - Always 3 lines tall (including borders).
 
 ### Content (Taglines)
-Randomized once at startup using this exact logic (copy from `src/app.rs`):
+The taglines are randomized at startup from a list of strings.
 
-```rust
-fn random_header_copy() -> &'static str {
-    const COPIES: [&str; 5] = [ /* 5 witty, thematic lines */ ];
-    let seed = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as usize).unwrap_or(0)
-        ^ std::process::id() as usize;
-    COPIES[seed % COPIES.len()]
-}
+By default, dd_dotstore uses these 5 built-in ones (feel free to customize per-app):
+
+- "Don't Fear the . (Dot) - Tame It."
+- ". (Dot) file Domination done right."
+- etc.
+
+**Customization:** Users can override the list by adding a `header_quotes:` section (list of strings) to their `dd_*_theme.yml` file. If omitted, the app's built-in defaults are used.
+
+Example in theme file:
+```yaml
+header_quotes:
+  - "Your custom quote here."
+  - "Another one for variety."
 ```
 
-Taglines should be fun, short, one-line, and match the app's personality (see dd_dotstore examples in the source).
+The randomization logic remains the same (time-based seed XOR PID for reproducibility per run but different each launch).
+
+Taglines should be fun, short, one-line, and match the app's personality.
 
 ### Theming
 - Whole header uses `app_shell` (base_background + text_primary).

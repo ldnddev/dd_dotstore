@@ -2,6 +2,15 @@ version: 1
 # dd_dotstore TUI Theme Configuration
 # Lookup order: ./dd_dotstore_theme.yml, ~/.config/ldnddev/dd_dotstore_theme.yml, built-in defaults
 
+# Optional: customize the random header taglines shown in the top banner.
+# If omitted or empty, built-in defaults are used.
+header_quotes:
+  - "Don't Fear the . (Dot) - Tame It."
+  - ". (Dot) file Domination done right."
+  - ". (Dot) file management fatigue is real. Or used to be."
+  - ". (Dot) file sync setup in seconds - okay, fast."
+  - ". (Dot) file management for the Ricer at heart."
+
 colors:
   base_background: "#0F1114"
   body_background: "#2A2D31"

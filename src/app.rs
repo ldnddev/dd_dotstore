@@ -43,7 +43,7 @@ impl App {
                     ThemeStatus::warning(format!("Theme warning: {err}; using built-in defaults"));
             }
         }
-        state.header_copy = random_header_copy().to_string();
+        state.header_copy = random_header_copy(&state.theme.header_quotes);
         state.tree = build_tree(project_root, &state.ignore_patterns);
 
         for (rel, dest) in state.persisted_symlinks.clone() {
@@ -95,19 +95,14 @@ impl App {
     }
 }
 
-fn random_header_copy() -> &'static str {
-    const COPIES: [&str; 5] = [
-        "Don't Fear the . (Dot) - Tame It.",
-        ". (Dot) file Domination done right.",
-        ". (Dot) file management fatiuge is real. Or use to be.",
-        ". (Dot) file sync setup in seconds - okay, fast.",
-        ". (Dot) file management for the Ricer at heart.",
-    ];
-
+fn random_header_copy(quotes: &[String]) -> String {
+    if quotes.is_empty() {
+        return "No quotes configured.".to_string();
+    }
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos() as usize)
         .unwrap_or(0)
         ^ std::process::id() as usize;
-    COPIES[seed % COPIES.len()]
+    quotes[seed % quotes.len()].clone()
 }

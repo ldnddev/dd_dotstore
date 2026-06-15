@@ -83,6 +83,9 @@ fn local_standard_theme_file_is_loaded() {
         root.join("dd_dotstore_theme.yml"),
         r##"
 version: 1
+header_quotes:
+  - "Custom quote 1"
+  - "Custom quote 2"
 colors:
   base_background: "#010203"
   body_background: "#111213"
@@ -120,6 +123,7 @@ colors:
     assert_eq!(theme.colors.base_background, Color::Rgb(1, 2, 3));
     assert_eq!(theme.colors.border_active, Color::Rgb(0xb1, 0xb2, 0xb3));
     assert_eq!(theme.colors.links, Color::Rgb(0x9a, 0x9b, 0x9c));
+    assert_eq!(theme.header_quotes, vec!["Custom quote 1".to_string(), "Custom quote 2".to_string()]);
 
     let _ = fs::remove_dir_all(root);
 }
@@ -169,6 +173,8 @@ colors:
             .message
             .contains("Unsupported theme schema version")
     );
+    assert_eq!(app.state.theme.header_quotes.len(), 5);
+    assert!(app.state.theme.header_quotes.iter().any(|q| q.contains("Ricer")));
 
     let _ = fs::remove_dir_all(root);
 }
