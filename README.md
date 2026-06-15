@@ -93,7 +93,7 @@ cargo build --release
 
 ## Theme
 
-`dd_dotstore` uses the shared ldnddev TUI theme schema from `THEME_STRUCTURE_STANDARD.md`.
+`dd_dotstore` uses the shared ldnddev TUI theme system (and overall visual standard) defined in `LDNDDEV_TUI_VISUAL_STANDARD.md` (which incorporates the original `THEME_STRUCTURE_STANDARD.md`).
 
 Theme lookup order:
 1. `./dd_dotstore_theme.yml`
@@ -112,6 +112,18 @@ colors:
 At startup, the footer shows theme health/status, including the active source and schema version. If a local or global theme is missing required fields, has an unsupported version, or cannot be parsed, `dd_dotstore` falls back to built-in defaults and shows a warning in the footer.
 
 The credits modal shows the active theme source as `local`, `global`, or `default`.
+
+## Visual Design Standard
+
+`dd_dotstore` follows the shared ldnddev TUI Visual Standard defined in `LDNDDEV_TUI_VISUAL_STANDARD.md`. This single document covers:
+
+- The complete theme system and token mappings
+- Header and footer (shell) structure and behavior
+- The Source panel (folder navigation) data model, rendering, keyboard, and mouse interactions
+
+All future ldnddev TUI tools (such as dd_ftp) are expected to follow the same standard for a consistent user experience.
+
+See also the older supporting doc: `THEME_STRUCTURE_STANDARD.md` (now incorporated into the master document). `HEADER_FOOTER_GUIDE.md` and `SOURCE_PANEL_GUIDE.md` have been removed.
 
 ## Install
 

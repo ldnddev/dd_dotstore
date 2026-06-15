@@ -2,6 +2,12 @@
 
 TUI application for managing Linux dotfiles symlinks using Rust + ratatui.
 
+This document describes the current implementation. For the **normative visual and interaction rules** that all ldnddev TUI apps (including future ones) must follow, see the master document:
+
+**`LDNDDEV_TUI_VISUAL_STANDARD.md`** (theme + header/footer + source panel + layout).
+
+The older `THEME_STRUCTURE_STANDARD.md` (now incorporated into the master document) is kept for reference. `HEADER_FOOTER_GUIDE.md` and `SOURCE_PANEL_GUIDE.md` have been removed as they are fully superseded by `LDNDDEV_TUI_VISUAL_STANDARD.md`.
+
 ## Goals
 - Select project folder (default = current dir)
 - Show directory tree of dotfiles on left panel
@@ -10,7 +16,7 @@ TUI application for managing Linux dotfiles symlinks using Rust + ratatui.
 - Persist configuration (.dd_dotstore.json)
 - Undo (last 10 actions, persisted)
 - Filter/search, ignore patterns, import/export
-- Catppuccin theme, vim-style keys, status icons
+- Shared ldnddev TUI theme and visual standard (see LDNDDEV_TUI_VISUAL_STANDARD.md), vim-style keys, status icons
 
 ## Project Structure
 src/

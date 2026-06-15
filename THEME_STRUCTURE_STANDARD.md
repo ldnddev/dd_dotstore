@@ -1,5 +1,9 @@
 # ldnddev TUI Theme Structure Standard
 
+**Note:** This document is now incorporated into the master `LDNDDEV_TUI_VISUAL_STANDARD.md`. It is kept for historical reference only.
+
+---
+
 Use this document as the single source of truth for theming all ldnddev TUI apps.
 
 ---
