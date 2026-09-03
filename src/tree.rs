@@ -1,4 +1,4 @@
-use crate::state::{ActionMode, AppState, Node, NodeKind, SymlinkStatus};
+use crate::domain::{ActionMode, AppState, Node, NodeKind, SymlinkStatus};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -46,6 +46,7 @@ pub fn build_tree(root: &Path, ignores: &[String]) -> Vec<Node> {
                 selected: false,
                 action_mode: ActionMode::Symlink,
                 symlink_status: SymlinkStatus::None,
+                has_configured_descendant: false,
             };
 
             if matches!(node.kind, NodeKind::Folder { .. }) {
@@ -109,9 +110,26 @@ fn flatten_emit(
         return;
     }
 
-    let mut display = node.clone();
-    // PR 5: set has_configured_descendant from the live node, switch draw to that
-    // flag, then children.clear() on the display clone. Do not clear before that.
+    // Flag from the live node, then a display row with empty children — do not
+    // clone Folder.children only to throw them away.
+    let has_configured_descendant = subtree_has_destination(node);
+    let kind = match &node.kind {
+        NodeKind::File { dest } => NodeKind::File { dest: dest.clone() },
+        NodeKind::Folder { expanded, dest, .. } => NodeKind::Folder {
+            children: Vec::new(),
+            expanded: *expanded,
+            dest: dest.clone(),
+        },
+    };
+    let mut display = Node {
+        name: node.name.clone(),
+        path: node.path.clone(),
+        kind,
+        selected: node.selected,
+        action_mode: node.action_mode,
+        symlink_status: node.symlink_status,
+        has_configured_descendant,
+    };
     let connector = if depth == 0 {
         ""
     } else if is_last {
@@ -191,7 +209,7 @@ pub fn flatten_visible(state: &mut AppState) {
     }
 }
 
-fn fuzzy_match(candidate: &str, query: &[char]) -> bool {
+pub fn fuzzy_match(candidate: &str, query: &[char]) -> bool {
     if query.is_empty() {
         return true;
     }
@@ -205,6 +223,14 @@ fn fuzzy_match(candidate: &str, query: &[char]) -> bool {
         }
     }
     false
+}
+
+pub fn subtree_has_destination(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::File { dest: Some(_) } | NodeKind::Folder { dest: Some(_), .. } => true,
+        NodeKind::Folder { children, .. } => children.iter().any(subtree_has_destination),
+        _ => false,
+    }
 }
 
 pub fn find_mut_node<'a>(nodes: &'a mut [Node], target: &Path) -> Option<&'a mut Node> {

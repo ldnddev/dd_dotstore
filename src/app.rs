@@ -5,8 +5,9 @@ use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{
-    inputs::{handle_key, handle_mouse},
-    state::{Action, AppState, PERSIST_IDLE, Theme, ThemeStatus, load, load_theme},
+    domain::{Action, AppState, PERSIST_IDLE, load},
+    input::{handle_key, handle_mouse},
+    theme::{Theme, ThemeStatus, load_theme},
     tree::{AssignmentSource, rebuild_tree},
     ui::draw,
 };
