@@ -24,7 +24,8 @@ TUI tool to manage Linux dotfiles: select project folder, assign destinations, c
 
 ## Keybindings
 **Main keys**
-q / Esc         Quit
+q / Q           Quit
+Esc             Close modal / clear filter / clear selection (does not quit)
 F1              Help modal
 F2              Credits modal
 j / k / ↑ / ↓   Navigate list
@@ -66,6 +67,7 @@ i / E           Import / Export config
 - Enhanced status icons (◌ for folders with subtree destinations)
 - In the destination browser modal: click to move highlight, double-click name to pick/enter a dir, drag or click its scrollbar to scroll the picker list
 - Click outside an open modal: close/cancel the modal
+- Click inside a confirm/overwrite/preview dialog does nothing — use Y
 - Click a toast: dismiss it immediately
 - Import picker: click a row to choose it (press Enter to confirm the import)
 

@@ -100,6 +100,7 @@ pub enum Modal {
     OverwriteWarning {
         conflicts: Vec<Conflict>,
         action_type: BulkAction,
+        scroll: usize,
     },
     Search,
     IgnoreEditor {
@@ -127,6 +128,7 @@ pub enum BulkAction {
 pub struct Conflict {
     pub dest: PathBuf,
     pub is_real_file: bool,
+    pub is_dir: bool, // true => confirm_bulk_with_overwrite will remove_dir_all
 }
 
 #[derive(Clone, Debug)]

@@ -386,11 +386,14 @@ pub fn selected_create_conflicts(state: &AppState) -> Vec<Conflict> {
             conflicts.push(Conflict {
                 dest: dest.clone(),
                 is_real_file: true,
+                is_dir: meta.is_dir(),
             });
             seen.insert(dest);
         }
     }
 
+    // Dirs first so every DIR is visible before file rows.
+    conflicts.sort_by_key(|c| !c.is_dir);
     conflicts
 }
 

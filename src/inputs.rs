@@ -6,7 +6,7 @@ use crate::actions::{
     assign_destination, confirm_bulk, confirm_bulk_with_overwrite, export_to_path,
     import_from_path, open_export_picker, open_import_picker, selected_create_conflicts, undo_last,
 };
-use crate::state::{AppState, BrowserState, BulkAction, Modal, NodeKind};
+use crate::state::{AppState, BrowserState, BulkAction, Modal, Node, NodeKind};
 use crate::toast::ToastLevel;
 use crate::tree::{
     AssignmentSource, find_mut_node, flatten_visible, rebuild_tree, toggle_expand, toggle_selected,
@@ -26,7 +26,11 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         KeyCode::F(2) => {
             state.modal = Some(Modal::Credits);
         }
-        KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
+        KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(true),
+        KeyCode::Esc => {
+            handle_esc_main(state);
+            return Ok(false);
+        }
 
         KeyCode::Down | KeyCode::Char('j') => move_selection(state, 1),
         KeyCode::Up | KeyCode::Char('k') => move_selection(state, -1),
@@ -87,6 +91,37 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     }
 
     Ok(false)
+}
+
+fn handle_esc_main(state: &mut AppState) {
+    if !state.filter.is_empty() {
+        state.filter.clear();
+        flatten_visible(state);
+        return;
+    }
+    if any_tree_selected(&state.tree) {
+        clear_tree_selected(&mut state.tree);
+        flatten_visible(state);
+    }
+}
+
+fn any_tree_selected(nodes: &[Node]) -> bool {
+    nodes.iter().any(|n| {
+        n.selected
+            || match &n.kind {
+                NodeKind::Folder { children, .. } => any_tree_selected(children),
+                NodeKind::File { .. } => false,
+            }
+    })
+}
+
+fn clear_tree_selected(nodes: &mut [Node]) {
+    for n in nodes {
+        n.selected = false;
+        if let NodeKind::Folder { children, .. } = &mut n.kind {
+            clear_tree_selected(children);
+        }
+    }
 }
 
 fn move_selection(state: &mut AppState, delta: isize) {
@@ -221,6 +256,7 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                         state.modal = Some(Modal::OverwriteWarning {
                             conflicts,
                             action_type: action,
+                            scroll: 0,
                         });
                         return Ok(false);
                     }
@@ -240,6 +276,7 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                         state.modal = Some(Modal::OverwriteWarning {
                             conflicts,
                             action_type: action,
+                            scroll: 0,
                         });
                         return Ok(false);
                     }
@@ -379,10 +416,29 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             state.modal = Some(Modal::IgnoreEditor { selected });
         }
 
-        Modal::OverwriteWarning { action_type, .. } => match key.code {
+        Modal::OverwriteWarning {
+            action_type,
+            conflicts,
+            scroll,
+        } => match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 confirm_bulk_with_overwrite(state, action_type, true)?;
                 state.modal = None;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max_scroll = conflicts.len().saturating_sub(1);
+                state.modal = Some(Modal::OverwriteWarning {
+                    conflicts,
+                    action_type,
+                    scroll: (scroll + 1).min(max_scroll),
+                });
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.modal = Some(Modal::OverwriteWarning {
+                    conflicts,
+                    action_type,
+                    scroll: scroll.saturating_sub(1),
+                });
             }
             _ => state.modal = None,
         },
@@ -616,12 +672,12 @@ fn handle_main_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
 
                 let (maybe_idx, is_name_part) = hit_test_source_row(state, mouse.column, mouse.row);
                 if let Some(idx) = maybe_idx {
-                    // Always move the highlight cursor
+                    // Capture highlight before moving so Shift+click range is not a one-row select.
+                    let prev = state.list_state.selected();
                     state.list_state.select(Some(idx));
 
-                    // Range select via Shift+click (polish feature)
                     if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-                        if let Some(cur) = state.list_state.selected() {
+                        if let Some(cur) = prev {
                             let start = cur.min(idx);
                             let end = cur.max(idx);
                             for i in start..=end {
@@ -994,11 +1050,7 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
         Some(Modal::ConfirmBulk { .. })
         | Some(Modal::OverwriteWarning { .. })
         | Some(Modal::PreviewBulk { .. }) => {
-            // Click inside = confirm (y) for safety dialogs, outside already cancelled above.
-            // For Preview (dry-run), click cancels (use keyboard Y to proceed to actual apply).
-            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                state.modal = None;
-            }
+            // Mis-click must neither apply nor dismiss a dialog that can remove_dir_all.
         }
 
         // For help/credits/search/ignore/export: inside click does nothing special, outside cancelled

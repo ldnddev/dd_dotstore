@@ -1,16 +1,18 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use dd_dotstore::actions::{
     assign_destination, create_copy, create_symlink, import_from_path, push_history,
-    remove_symlink, undo_last,
+    remove_symlink, selected_create_conflicts, undo_last,
 };
 use dd_dotstore::app::App;
-use dd_dotstore::inputs::handle_key;
+use dd_dotstore::inputs::{handle_key, handle_mouse};
 use dd_dotstore::state::{
-    Action, ActionMode, BrowserState, DirEntry, Modal, NodeKind, ThemeSource, load_persistent,
-    load_theme,
+    Action, ActionMode, BrowserState, BulkAction, DirEntry, Modal, NodeKind, ThemeSource,
+    load_persistent, load_theme,
 };
 use dd_dotstore::toast::{TOAST_DURATION, ToastLevel};
 use dd_dotstore::tree::{build_tree, find_node, flatten_visible};
+use dd_dotstore::ui::{overwrite_conflict_row, overwrite_warning_counts};
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1167,6 +1169,237 @@ fn dest_lock_does_not_mark_dirty() {
         app.state.dirty_since.is_none(),
         "dest-lock must not mark dirty"
     );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+fn mouse_left(col: u16, row: u16, shift: bool) -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: col,
+        row,
+        modifiers: if shift {
+            KeyModifiers::SHIFT
+        } else {
+            KeyModifiers::NONE
+        },
+    }
+}
+
+#[test]
+fn shift_click_range_selects_from_previous_highlight() {
+    let root = temp_path("dd_dotstore_test_shift_click");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("alpha"), "a").expect("write alpha");
+    fs::write(root.join("bravo"), "b").expect("write bravo");
+    fs::write(root.join("charlie"), "c").expect("write charlie");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    app.state.source_area = Rect::new(0, 0, 40, 20);
+    let (i0, i1, i2) = {
+        let idx = |name: &str| {
+            app.state
+                .nodes
+                .iter()
+                .position(|n| n.path == Path::new(name))
+                .expect(name)
+        };
+        (idx("alpha"), idx("bravo"), idx("charlie"))
+    };
+    app.state.list_state.select(Some(i0));
+
+    // inner_y = 1, so row = 1 + index
+    let _ = handle_mouse(&mut app.state, mouse_left(20, 1 + i2 as u16, true))
+        .expect("shift-click range");
+
+    assert!(
+        find_node(&app.state.tree, Path::new("alpha"))
+            .unwrap()
+            .selected
+    );
+    assert!(
+        find_node(&app.state.tree, Path::new("bravo"))
+            .unwrap()
+            .selected,
+        "middle row must be included (bug was cur == idx after moving highlight)"
+    );
+    assert!(
+        find_node(&app.state.tree, Path::new("charlie"))
+            .unwrap()
+            .selected
+    );
+    assert_eq!(app.state.list_state.selected(), Some(i2));
+    assert_eq!(i1, i0 + 1);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn esc_does_not_quit_main_view() {
+    let root = temp_path("dd_dotstore_test_esc_no_quit");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    app.state.filter = "nope".to_string();
+    flatten_visible(&mut app.state);
+
+    let quit = handle_key(&mut app.state, key(KeyCode::Esc)).expect("esc filter");
+    assert!(!quit, "Esc must not quit");
+    assert!(app.state.filter.is_empty());
+    assert!(app.state.modal.is_none());
+
+    let idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".bashrc"))
+        .expect("find bashrc");
+    app.state.list_state.select(Some(idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char(' '))).expect("select");
+    assert!(
+        find_node(&app.state.tree, Path::new(".bashrc"))
+            .unwrap()
+            .selected
+    );
+
+    let quit = handle_key(&mut app.state, key(KeyCode::Esc)).expect("esc selection");
+    assert!(!quit, "Esc must not quit");
+    assert!(
+        !find_node(&app.state.tree, Path::new(".bashrc"))
+            .unwrap()
+            .selected
+    );
+
+    let quit = handle_key(&mut app.state, key(KeyCode::Esc)).expect("esc noop");
+    assert!(!quit, "Esc must not quit when nothing to clear");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn q_and_Q_quit() {
+    let root = temp_path("dd_dotstore_test_q_quit");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".zshrc"), "export PATH=$PATH").expect("write zshrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    assert!(handle_key(&mut app.state, key(KeyCode::Char('q'))).expect("q"));
+    assert!(handle_key(&mut app.state, key(KeyCode::Char('Q'))).expect("Q"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn overwrite_lists_all_dirs_then_files() {
+    let root = temp_path("dd_dotstore_test_overwrite_all_dirs");
+    fs::create_dir_all(&root).expect("create root");
+    let dest_root = root.join("home");
+    fs::create_dir_all(&dest_root).expect("create dest root");
+
+    let dir_names = ["dir_a", "dir_b", "dir_c", "dir_d", "dir_e"];
+    for name in dir_names {
+        fs::create_dir_all(root.join(name)).expect("src dir");
+        fs::create_dir_all(dest_root.join(name)).expect("real dest dir");
+    }
+    for name in ["file_f", "file_g"] {
+        fs::write(root.join(name), "src").expect("src file");
+        fs::write(dest_root.join(name), "existing").expect("real dest file");
+    }
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    for name in dir_names.iter().chain(["file_f", "file_g"].iter()) {
+        assign_destination(&mut app.state, Path::new(name), dest_root.join(name))
+            .expect("assign dest");
+    }
+    for node in app.state.nodes.iter_mut() {
+        node.selected = true;
+    }
+
+    let conflicts = selected_create_conflicts(&app.state);
+    let (dirs, files, total) = overwrite_warning_counts(&conflicts);
+    assert_eq!((dirs, files, total), (5, 2, 7));
+    assert!(conflicts.iter().take(5).all(|c| c.is_dir));
+    assert!(conflicts.iter().skip(5).all(|c| !c.is_dir));
+    for name in dir_names {
+        assert!(
+            conflicts
+                .iter()
+                .any(|c| c.dest == dest_root.join(name) && c.is_dir),
+            "missing DIR {name}"
+        );
+    }
+    let rows: Vec<String> = conflicts.iter().map(overwrite_conflict_row).collect();
+    assert_eq!(rows.iter().filter(|r| r.contains("DIR")).count(), 5);
+    assert_eq!(rows.iter().filter(|r| r.contains("FILE")).count(), 2);
+
+    app.state.modal = Some(Modal::ConfirmBulk {
+        action: BulkAction::Create,
+    });
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("open overwrite");
+    match &app.state.modal {
+        Some(Modal::OverwriteWarning {
+            conflicts: modal_conflicts,
+            scroll,
+            ..
+        }) => {
+            assert_eq!(modal_conflicts.len(), 7);
+            assert_eq!(modal_conflicts.iter().filter(|c| c.is_dir).count(), 5);
+            assert_eq!(*scroll, 0);
+        }
+        other => panic!("expected OverwriteWarning, got {other:?}"),
+    }
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('j'))).expect("scroll down");
+    match &app.state.modal {
+        Some(Modal::OverwriteWarning { scroll, .. }) => assert_eq!(*scroll, 1),
+        other => panic!("j must not cancel overwrite, got {other:?}"),
+    }
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('k'))).expect("scroll up");
+    match &app.state.modal {
+        Some(Modal::OverwriteWarning { scroll, .. }) => assert_eq!(*scroll, 0),
+        other => panic!("k must not cancel overwrite, got {other:?}"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn click_inside_confirm_overwrite_preview_is_noop() {
+    let root = temp_path("dd_dotstore_test_click_inside_noop");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".profile"), "export PATH=$PATH").expect("write profile");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    app.state.current_modal_area = Some(Rect::new(10, 10, 40, 20));
+
+    for modal in [
+        Modal::ConfirmBulk {
+            action: BulkAction::Create,
+        },
+        Modal::PreviewBulk {
+            action: BulkAction::Create,
+        },
+        Modal::OverwriteWarning {
+            conflicts: vec![],
+            action_type: BulkAction::Create,
+            scroll: 0,
+        },
+    ] {
+        app.state.modal = Some(modal);
+        let _ = handle_mouse(&mut app.state, mouse_left(20, 15, false)).expect("inside click");
+        assert!(
+            app.state.modal.is_some(),
+            "click inside confirm/overwrite/preview must be a no-op"
+        );
+    }
+
+    app.state.modal = Some(Modal::ConfirmBulk {
+        action: BulkAction::Create,
+    });
+    let _ = handle_mouse(&mut app.state, mouse_left(0, 0, false)).expect("outside click");
+    assert!(app.state.modal.is_none(), "click outside must still cancel");
 
     let _ = fs::remove_dir_all(root);
 }
