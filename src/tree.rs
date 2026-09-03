@@ -1,6 +1,6 @@
 use crate::state::{ActionMode, AppState, Node, NodeKind, SymlinkStatus};
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -65,6 +65,102 @@ pub fn build_tree(root: &Path, ignores: &[String]) -> Vec<Node> {
     recurse(root, root, ignores)
 }
 
+/// Phase 1 — query non-empty only. Recurse ALL children (even collapsed) to
+/// compute keep and set expanded=true on folders that contain a match.
+/// Does not emit rows. Returns whether self or a descendant matches.
+fn annotate_filter_matches(node: &mut Node, query: &[char], keep: &mut HashSet<PathBuf>) -> bool {
+    let self_match = fuzzy_match(&node.name, query);
+    let mut child_match = false;
+    if let NodeKind::Folder {
+        children, expanded, ..
+    } = &mut node.kind
+    {
+        for child in children.iter_mut() {
+            if annotate_filter_matches(child, query, keep) {
+                child_match = true;
+            }
+        }
+        if child_match {
+            *expanded = true;
+        }
+    }
+    let matches = self_match || child_match;
+    if matches {
+        keep.insert(node.path.clone());
+    }
+    matches
+}
+
+/// Phase 2 — emit pre-order (push the display row, then children).
+/// Empty query: walk children only if `expanded`. Emit every visited node,
+/// including unmatched folders.
+/// Non-empty query: emit iff `keep` contains the path; do not use
+/// `match || is Folder`. Ancestors of matches are already expanded.
+fn flatten_emit(
+    node: &Node,
+    depth: usize,
+    query: &[char],
+    keep: &HashSet<PathBuf>,
+    prefix: &str,
+    is_last: bool,
+    out: &mut Vec<Node>,
+) {
+    if !query.is_empty() && !keep.contains(&node.path) {
+        return;
+    }
+
+    let mut display = node.clone();
+    // PR 5: set has_configured_descendant from the live node, switch draw to that
+    // flag, then children.clear() on the display clone. Do not clear before that.
+    let connector = if depth == 0 {
+        ""
+    } else if is_last {
+        "└─ "
+    } else {
+        "├─ "
+    };
+    let continuation = if depth == 0 {
+        ""
+    } else if is_last {
+        "   "
+    } else {
+        "│  "
+    };
+    let tree_part = format!("{}{}", prefix, connector);
+    display.name = format!("{}{}", tree_part, node.name);
+    out.push(display);
+
+    let NodeKind::Folder {
+        children, expanded, ..
+    } = &node.kind
+    else {
+        return;
+    };
+
+    if query.is_empty() && !*expanded {
+        return;
+    }
+
+    let visible: Vec<&Node> = if query.is_empty() {
+        children.iter().collect()
+    } else {
+        children.iter().filter(|c| keep.contains(&c.path)).collect()
+    };
+    let next_prefix = format!("{}{}", prefix, continuation);
+    for (i, child) in visible.iter().enumerate() {
+        let child_is_last = i == visible.len() - 1;
+        flatten_emit(
+            child,
+            depth + 1,
+            query,
+            keep,
+            &next_prefix,
+            child_is_last,
+            out,
+        );
+    }
+}
+
 pub fn flatten_visible(state: &mut AppState) {
     state.nodes.clear();
     let filter_query: Vec<char> = state
@@ -73,61 +169,15 @@ pub fn flatten_visible(state: &mut AppState) {
         .map(|c| c.to_ascii_lowercase())
         .collect();
 
-    fn walk(
-        node: &Node,
-        depth: usize,
-        query: &[char],
-        prefix: &str,
-        is_last: bool,
-        out: &mut Vec<Node>,
-    ) {
-        let matches = query.is_empty() || fuzzy_match(&node.name, query);
-        if matches || matches!(node.kind, NodeKind::Folder { .. }) {
-            let mut display = node.clone();
-            let connector = if depth == 0 {
-                ""
-            } else if is_last {
-                "└─ "
-            } else {
-                "├─ "
-            };
-            let continuation = if depth == 0 {
-                ""
-            } else if is_last {
-                "   "
-            } else {
-                "│  "
-            };
-            let tree_part = format!("{}{}", prefix, connector);
-            display.name = format!("{}{}", tree_part, node.name);
-            out.push(display);
-
-            let next_prefix = format!("{}{}", prefix, continuation);
-
-            if let NodeKind::Folder {
-                children, expanded, ..
-            } = &node.kind
-                && *expanded
-            {
-                // Determine visible children among the rendered list (match or folders for hierarchy under filter)
-                let visible_children: Vec<&Node> = children
-                    .iter()
-                    .filter(|c| {
-                        let c_matches = query.is_empty() || fuzzy_match(&c.name, query);
-                        c_matches || matches!(c.kind, NodeKind::Folder { .. })
-                    })
-                    .collect();
-
-                for (i, child) in visible_children.iter().enumerate() {
-                    let child_is_last = i == visible_children.len() - 1;
-                    walk(child, depth + 1, query, &next_prefix, child_is_last, out);
-                }
-            }
+    let mut keep = HashSet::new();
+    if !filter_query.is_empty() {
+        for node in &mut state.tree {
+            annotate_filter_matches(node, &filter_query, &mut keep);
         }
     }
 
     for node in &state.tree {
-        walk(node, 0, &filter_query, "", true, &mut state.nodes);
+        flatten_emit(node, 0, &filter_query, &keep, "", true, &mut state.nodes);
     }
 
     if state.nodes.is_empty() {

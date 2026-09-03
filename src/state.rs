@@ -84,6 +84,10 @@ pub struct PersistentData {
     #[serde(default)]
     pub modes: HashMap<String, ActionMode>,
     pub history: Vec<Action>,
+    /// None = key missing (1.1 configs): keep session / builtin defaults.
+    /// Some(v) (including empty) = use v exactly.
+    #[serde(default)]
+    pub ignore_patterns: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -101,9 +105,9 @@ pub enum Modal {
         action_type: BulkAction,
         scroll: usize,
     },
-    Search,
     IgnoreEditor {
         selected: usize,
+        draft: String,
     },
     Help,
     Credits,
@@ -720,6 +724,8 @@ pub struct AppState {
     pub list_state: ratatui::widgets::ListState,
     pub status_list_state: ratatui::widgets::ListState,
     pub filter: String,
+    pub filter_editing: bool,
+    pub filter_snapshot: String,
     pub modal: Option<Modal>,
     pub toast: Option<Toast>,
     pub history: VecDeque<Action>,
@@ -847,6 +853,9 @@ pub fn load(path: &Path) -> Result<AppState> {
     state.history = data.history.into_iter().collect();
     state.persisted_symlinks = data.symlinks;
     state.persisted_modes = data.modes;
+    if let Some(pats) = data.ignore_patterns {
+        state.ignore_patterns = pats;
+    }
     Ok(state)
 }
 
@@ -856,6 +865,7 @@ pub fn save(state: &AppState, path: &Path) -> Result<()> {
         symlinks,
         modes,
         history: state.history.iter().cloned().collect(),
+        ignore_patterns: Some(state.ignore_patterns.clone()),
     };
 
     let json = serde_json::to_string_pretty(&data)?;

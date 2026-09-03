@@ -20,6 +20,10 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         return handle_modal_key(state, key);
     }
 
+    if state.filter_editing {
+        return handle_filter_key(state, key);
+    }
+
     match key.code {
         KeyCode::F(1) => {
             state.modal = Some(Modal::Help);
@@ -66,8 +70,8 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('u') => undo_last(state)?,
 
         KeyCode::Char('/') => {
-            state.modal = Some(Modal::Search);
-            state.filter.clear();
+            state.filter_snapshot = state.filter.clone();
+            state.filter_editing = true;
         }
 
         KeyCode::Char('r') => {
@@ -75,7 +79,10 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         }
 
         KeyCode::Char('I') => {
-            state.modal = Some(Modal::IgnoreEditor { selected: 0 });
+            state.modal = Some(Modal::IgnoreEditor {
+                selected: 0,
+                draft: String::new(),
+            });
         }
 
         KeyCode::Char('i') => open_import_picker(state)?,
@@ -84,6 +91,35 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         _ => {}
     }
 
+    Ok(false)
+}
+
+/// Closed match. Never quits. Flatten after every filter mutation, including Esc restore.
+fn handle_filter_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
+    match key.code {
+        KeyCode::Esc => {
+            state.filter = state.filter_snapshot.clone();
+            state.filter_editing = false;
+            flatten_visible(state);
+        }
+        KeyCode::Enter => {
+            state.filter_editing = false;
+            flatten_visible(state);
+        }
+        KeyCode::Backspace => {
+            let _ = state.filter.pop();
+            flatten_visible(state);
+        }
+        KeyCode::Char(c) if key.modifiers.is_empty() && (c.is_ascii_graphic() || c == ' ') => {
+            // Same gate as dest browser. Graphic chars including q, /, j, k, s.
+            // Space inserts. Ctrl+g is Char('g')+CONTROL and must be swallowed.
+            state.filter.push(c);
+            flatten_visible(state);
+        }
+        _ => {
+            // Swallow F1/F2, arrows, Ctrl+g / Alt+…, etc.
+        }
+    }
     Ok(false)
 }
 
@@ -370,37 +406,61 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             }
         }
 
-        Modal::Search => {
+        Modal::IgnoreEditor {
+            mut selected,
+            mut draft,
+        } => {
             match key.code {
-                KeyCode::Char(c) if c.is_ascii() => state.filter.push(c),
-                KeyCode::Backspace => {
-                    let _ = state.filter.pop();
+                KeyCode::Up | KeyCode::Char('k') if key.modifiers.is_empty() => {
+                    selected = selected.saturating_sub(1);
                 }
-                KeyCode::Esc | KeyCode::Enter => state.modal = None,
-                _ => {}
-            }
-            flatten_visible(state);
-        }
-
-        Modal::IgnoreEditor { mut selected } => {
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => selected = selected.saturating_sub(1),
-                KeyCode::Down | KeyCode::Char('j') => {
-                    selected = (selected + 1).min(state.ignore_patterns.len().saturating_sub(1));
+                KeyCode::Down | KeyCode::Char('j') if key.modifiers.is_empty() => {
+                    if !state.ignore_patterns.is_empty() {
+                        selected =
+                            (selected + 1).min(state.ignore_patterns.len().saturating_sub(1));
+                    }
                 }
-                KeyCode::Delete | KeyCode::Char('d') => {
+                KeyCode::Delete | KeyCode::Char('d') if key.modifiers.is_empty() => {
                     if selected < state.ignore_patterns.len() {
                         state.ignore_patterns.remove(selected);
-                        selected = selected.min(state.ignore_patterns.len().saturating_sub(1));
+                        if !state.ignore_patterns.is_empty() {
+                            selected = selected.min(state.ignore_patterns.len().saturating_sub(1));
+                        } else {
+                            selected = 0;
+                        }
+                        state.mark_dirty();
+                        rebuild_tree(state, AssignmentSource::LiveTree)?;
+                        state.persist_now_or_toast();
                     }
+                }
+                KeyCode::Enter => {
+                    if !draft.is_empty() {
+                        state.ignore_patterns.push(std::mem::take(&mut draft));
+                        selected = state.ignore_patterns.len().saturating_sub(1);
+                        state.mark_dirty();
+                        rebuild_tree(state, AssignmentSource::LiveTree)?;
+                        state.persist_now_or_toast();
+                    }
+                }
+                KeyCode::Backspace => {
+                    let _ = draft.pop();
                 }
                 KeyCode::Esc => {
                     state.modal = None;
                     return Ok(false);
                 }
+                KeyCode::Char(c)
+                    if key.modifiers.is_empty()
+                        && (c.is_ascii_graphic() || c == ' ')
+                        && !matches!(c, 'j' | 'k' | 'd') =>
+                {
+                    draft.push(c);
+                }
                 _ => {}
             }
-            state.modal = Some(Modal::IgnoreEditor { selected });
+            if state.modal.is_some() {
+                state.modal = Some(Modal::IgnoreEditor { selected, draft });
+            }
         }
 
         Modal::OverwriteWarning {
@@ -1053,9 +1113,8 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             // Mis-click must neither apply nor dismiss a dialog that can remove_dir_all.
         }
 
-        // For help/credits/search/ignore/export: inside click does nothing special, outside cancelled
-        Some(Modal::Search)
-        | Some(Modal::IgnoreEditor { .. })
+        // For help/credits/ignore/export: inside click does nothing special, outside cancelled
+        Some(Modal::IgnoreEditor { .. })
         | Some(Modal::Help)
         | Some(Modal::Credits)
         | Some(Modal::ExportPicker { .. }) => {
