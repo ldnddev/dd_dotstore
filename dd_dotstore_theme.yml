@@ -1,6 +1,6 @@
 version: 1
 # dd_dotstore TUI Theme Configuration
-# Lookup order: ./dd_dotstore_theme.yml, ~/.config/ldnddev/dd_dotstore_theme.yml, built-in defaults
+# Lookup order: ./dd_dotstore_theme.yml, $XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml, built-in defaults
 
 # Optional: customize the random header taglines shown in the top banner.
 # If omitted or empty, built-in defaults are used.

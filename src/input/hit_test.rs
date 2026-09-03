@@ -30,7 +30,6 @@ fn str_width(s: &str) -> u16 {
 }
 
 /// Widths come from the same strings draw uses, not magic columns.
-/// Visual-standard section 5 is patched in the docs/release PR.
 pub fn source_row_zones(
     tree_prefix: &str,
     name: &str,

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use ratatui::style::{Color, Modifier, Style};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -260,17 +261,33 @@ const DEFAULT_HEADER_QUOTES: [&str; 5] = [
     ". (Dot) file management for the Ricer at heart.",
 ];
 
+/// On-disk theme schema. Fields stay optional so missing keys keep the
+/// same anyhow messages the hand-rolled parser produced.
+#[derive(Debug, Deserialize)]
+struct ThemeFile {
+    version: Option<serde_yaml::Value>,
+    #[serde(default)]
+    header_quotes: Vec<String>,
+    colors: Option<HashMap<String, String>>,
+}
+
 pub fn load_theme(project_root: &Path) -> Result<Theme> {
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    load_theme_with(project_root, config_home.as_deref())
+}
+
+/// Same lookup as `load_theme`, with config-home injected so tests do not
+/// mutate process-global `XDG_CONFIG_HOME`.
+pub fn load_theme_with(project_root: &Path, config_home: Option<&Path>) -> Result<Theme> {
     let local = project_root.join(THEME_FILE_NAME);
     if local.exists() {
         return load_theme_file(&local, ThemeSource::Local);
     }
 
-    if let Some(home) = std::env::var_os("HOME") {
-        let global = PathBuf::from(home)
-            .join(".config")
-            .join("ldnddev")
-            .join(THEME_FILE_NAME);
+    if let Some(config_home) = config_home {
+        let global = config_home.join("ldnddev").join(THEME_FILE_NAME);
         if global.exists() {
             return load_theme_file(&global, ThemeSource::Global);
         }
@@ -282,7 +299,9 @@ pub fn load_theme(project_root: &Path) -> Result<Theme> {
 fn load_theme_file(path: &Path, source: ThemeSource) -> Result<Theme> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read theme file: {}", path.display()))?;
-    let version = parse_theme_version(&content)
+    let file: ThemeFile = serde_yaml::from_str(&content)
+        .with_context(|| format!("Failed to parse theme file: {}", path.display()))?;
+    let version = parse_theme_version(&file.version)
         .with_context(|| format!("Failed to parse theme file: {}", path.display()))?;
     if version != SUPPORTED_THEME_VERSION {
         return Err(anyhow!(
@@ -290,9 +309,9 @@ fn load_theme_file(path: &Path, source: ThemeSource) -> Result<Theme> {
             path.display()
         ));
     }
-    let colors = parse_theme_colors(&content)
+    let colors = parse_theme_colors(file.colors)
         .with_context(|| format!("Failed to parse theme file: {}", path.display()))?;
-    let mut header_quotes = parse_header_quotes(&content);
+    let mut header_quotes = file.header_quotes;
     if header_quotes.is_empty() {
         header_quotes = DEFAULT_HEADER_QUOTES
             .iter()
@@ -304,60 +323,38 @@ fn load_theme_file(path: &Path, source: ThemeSource) -> Result<Theme> {
     Ok(theme)
 }
 
-fn parse_theme_version(content: &str) -> Result<u64> {
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
+fn parse_theme_version(version: &Option<serde_yaml::Value>) -> Result<u64> {
+    let Some(value) = version else {
+        return Err(anyhow!(
+            "Missing required theme key `version`; expected `{SUPPORTED_THEME_VERSION}`"
+        ));
+    };
+    match value {
+        serde_yaml::Value::Number(n) => n
+            .as_u64()
+            .ok_or_else(|| anyhow!("Theme key `version` must be an integer")),
+        serde_yaml::Value::String(s) => {
+            let s = s.trim();
+            if s.is_empty() {
+                return Err(anyhow!("Missing value for theme key `version`"));
+            }
+            s.parse::<u64>()
+                .context("Theme key `version` must be an integer")
         }
-        if trimmed == "colors:" {
-            break;
-        }
-        let Some((raw_key, raw_value)) = trimmed.split_once(':') else {
-            continue;
-        };
-        if raw_key.trim() != "version" {
-            continue;
-        }
-        let value = extract_yaml_string_value(raw_value.trim())
-            .ok_or_else(|| anyhow!("Missing value for theme key `version`"))?;
-        return value
-            .parse::<u64>()
-            .context("Theme key `version` must be an integer");
+        serde_yaml::Value::Null => Err(anyhow!("Missing value for theme key `version`")),
+        _ => Err(anyhow!("Theme key `version` must be an integer")),
     }
-
-    Err(anyhow!(
-        "Missing required theme key `version`; expected `{SUPPORTED_THEME_VERSION}`"
-    ))
 }
 
-fn parse_theme_colors(content: &str) -> Result<ThemeColors> {
+fn parse_theme_colors(colors: Option<HashMap<String, String>>) -> Result<ThemeColors> {
+    let raw = colors.unwrap_or_default();
     let mut values: HashMap<String, Color> = HashMap::new();
-    let mut in_colors = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
+    for (key, value) in raw {
+        if value.trim().is_empty() {
+            return Err(anyhow!("Missing color value for theme key `{key}`"));
         }
-        if trimmed == "colors:" {
-            in_colors = true;
-            continue;
-        }
-        if !in_colors {
-            continue;
-        }
-        if !line.starts_with(' ') && !line.starts_with('\t') {
-            break;
-        }
-
-        let Some((raw_key, raw_value)) = trimmed.split_once(':') else {
-            continue;
-        };
-        let key = raw_key.trim();
-        let value = extract_yaml_string_value(raw_value.trim())
-            .ok_or_else(|| anyhow!("Missing color value for theme key `{key}`"))?;
-        values.insert(key.to_string(), parse_hex_color(key, value)?);
+        let color = parse_hex_color(&key, &value)?;
+        values.insert(key, color);
     }
 
     macro_rules! color {
@@ -396,58 +393,6 @@ fn parse_theme_colors(content: &str) -> Result<ThemeColors> {
         files: color!("files"),
         links: color!("links"),
     })
-}
-
-fn extract_yaml_string_value(raw: &str) -> Option<&str> {
-    let raw = raw.trim();
-    if let Some(rest) = raw.strip_prefix('"') {
-        return rest.split_once('"').map(|(value, _)| value);
-    }
-    if let Some(rest) = raw.strip_prefix('\'') {
-        return rest.split_once('\'').map(|(value, _)| value);
-    }
-    raw.split_whitespace().next()
-}
-
-fn parse_header_quotes(content: &str) -> Vec<String> {
-    let mut quotes: Vec<String> = Vec::new();
-    let mut in_quotes_section = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        if trimmed == "header_quotes:" {
-            in_quotes_section = true;
-            continue;
-        }
-        if in_quotes_section {
-            if !line.starts_with(' ') && !line.starts_with('\t') {
-                break; // end of section
-            }
-            // Handle YAML list items like: - "quote here"
-            let item = if let Some(rest) = trimmed.strip_prefix("- ") {
-                rest.trim()
-            } else if let Some(rest) = trimmed.strip_prefix("-") {
-                rest.trim()
-            } else {
-                trimmed
-            };
-            let value = if item.starts_with('"') || item.starts_with('\'') {
-                extract_yaml_string_value(item)
-            } else {
-                // unquoted, take whole as value (for simplicity, assume no inline comments)
-                Some(item)
-            };
-            if let Some(v) = value
-                && !v.is_empty()
-            {
-                quotes.push(v.to_string());
-            }
-        }
-    }
-    quotes
 }
 
 fn parse_hex_color(key: &str, value: &str) -> Result<Color> {

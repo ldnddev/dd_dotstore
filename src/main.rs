@@ -16,6 +16,10 @@ fn main() -> Result<()> {
             print_help(&mut io::stdout())?;
             return Ok(());
         }
+        Ok(CliAction::PrintVersion) => {
+            writeln!(io::stdout(), "dd_dotstore {}", env!("CARGO_PKG_VERSION"))?;
+            return Ok(());
+        }
         Err(err) => {
             let mut stderr = io::stderr();
             writeln!(stderr, "Error: {err}")?;
@@ -115,6 +119,7 @@ fn print_help(w: &mut impl Write) -> Result<()> {
     writeln!(w, "  --root <path>   Set project root explicitly")?;
     writeln!(w, "  --root=<path>   Same as above")?;
     writeln!(w, "  -h, --help      Show this help")?;
+    writeln!(w, "  -V, --version   Print version and exit")?;
     Ok(())
 }
 
@@ -122,6 +127,7 @@ fn print_help(w: &mut impl Write) -> Result<()> {
 enum CliAction {
     Run(Option<PathBuf>),
     PrintHelp,
+    PrintVersion,
 }
 
 fn parse_cli<I>(args: I) -> std::result::Result<CliAction, String>
@@ -134,6 +140,9 @@ where
     while let Some(arg) = args.next() {
         if arg == "--help" || arg == "-h" {
             return Ok(CliAction::PrintHelp);
+        }
+        if arg == "--version" || arg == "-V" {
+            return Ok(CliAction::PrintVersion);
         }
         if arg == "--root" {
             if let Some(path) = args.next() {
@@ -190,5 +199,14 @@ mod tests {
 
         let err = parse_cli(vec!["--bogus".to_string()]).expect_err("unknown option error");
         assert!(err.contains("Unknown option"));
+    }
+
+    #[test]
+    fn parse_version_flag() {
+        let cli = parse_cli(vec!["--version".to_string()]).expect("version");
+        assert_eq!(cli, CliAction::PrintVersion);
+
+        let cli = parse_cli(vec!["-V".to_string()]).expect("short version");
+        assert_eq!(cli, CliAction::PrintVersion);
     }
 }
