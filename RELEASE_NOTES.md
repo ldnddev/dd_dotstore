@@ -1,3 +1,7 @@
+## dd_dotstore v1.2.1
+
+Tagged release of the v1.2 line on `master` (PRs #1–#6). Same features as v1.2.0; crate version is now `1.2.1` so `--version` matches the git tag.
+
 ## dd_dotstore v1.2.0
 
 Reliability, advertised-UX, fewer apply steps, working search/ignore, module split, and a release train (theme loader, CLI, docs, CI).
@@ -32,7 +36,7 @@ Reliability, advertised-UX, fewer apply steps, working search/ignore, module spl
 ### Theme, CLI, docs, CI
 - Theme files parse with `serde_yaml` + validated `ThemeFile` (`version: 1`, every color key, `#RRGGBB`).
 - Global theme honors `$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml` (then `$HOME/.config`).
-- `dd_dotstore -V` / `--version` prints `dd_dotstore 1.2.0`.
+- `dd_dotstore -V` / `--version` prints `dd_dotstore {CARGO_PKG_VERSION}`.
 - MSRV rustc 1.85 (`edition = "2024"`). `install.sh` and README match.
 - `ARCHITECTURE.md` rewritten to the live modules. Visual standard patched (footer `q`, Esc, inline filter, planned glyph, hit-test, XDG).
 - GitHub Actions CI on `master`: `cargo fmt --check`, `clippy -D warnings`, `cargo test`.
