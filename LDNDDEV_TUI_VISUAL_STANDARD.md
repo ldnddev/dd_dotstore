@@ -2,7 +2,7 @@
 
 **Single source of truth for consistent look, feel, and structure across all ldnddev terminal user interface applications.**
 
-This document incorporates and supersedes the previous separate guides (THEME_STRUCTURE_STANDARD.md for core theming, plus the now-deleted HEADER_FOOTER_GUIDE.md and SOURCE_PANEL_GUIDE.md).
+This document incorporates and supersedes the previous separate guides (`THEME_STRUCTURE_STANDARD.md` for core theming — now deleted — plus the now-deleted `HEADER_FOOTER_GUIDE.md` and `SOURCE_PANEL_GUIDE.md`).
 
 All new ldnddev TUI apps (e.g. dd_dotstore, dd_ftp, etc.) **must** follow this standard so users experience a familiar, polished, and cohesive environment.
 
@@ -45,7 +45,7 @@ All new ldnddev TUI apps (e.g. dd_dotstore, dd_ftp, etc.) **must** follow this s
 
 ### Lookup Order (every app must follow exactly)
 1. `./<PROJECT_NAME>_theme.yml` (local override)
-2. `~/.config/ldnddev/<PROJECT_NAME>_theme.yml` (global)
+2. `$XDG_CONFIG_HOME/ldnddev/<PROJECT_NAME>_theme.yml` (global; `XDG_CONFIG_HOME` defaults to `$HOME/.config`)
 3. Built-in defaults inside the app
 
 ### Required Schema Version
@@ -139,7 +139,7 @@ header_quotes:
 - Show theme health at startup (in footer or toast).
 - Full details must appear in the F2 Credits modal.
 
-See the original `THEME_STRUCTURE_STANDARD.md` for the complete validation checklist and anti-patterns.
+Validation checklist: local path, then XDG global, then built-in; every schema color key present as `#RRGGBB`; `version: 1`; no hardcoded colors after load. Anti-patterns: hardcoding colors in render paths, using one token for unrelated intents, missing focus-state mapping, inconsistent semantics between apps.
 
 ---
 
@@ -223,14 +223,16 @@ Taglines should be fun, short, one-line, and match the app's personality.
 let keys = if area.width < 75 {
     "F1:Help  q:Quit  j/k:Nav  Spc:Sel  s:Apply  x:Rem  /:Filter"
 } else if area.width < 110 {
-    "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit"
+    "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   q: Quit"
 } else {
-    "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit   (mouse: click/scroll/drag)"
+    "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   q: Quit   (mouse: click/scroll/drag)"
 };
 ```
 
 **Rules**
 - Always start with `F1:Help`.
+- Canonical quit chord in the footer is lowercase `q` (`q:Quit` / `q: Quit`). Bind both `q` and `Q`; do not label `Q: Exit`.
+- `Esc` does **not** quit. Cascade: close modal → (if filter editing, restore snapshot + flatten) → clear filter → clear selection → stop.
 - Use very terse abbreviations on narrow terminals.
 - Only show the mouse reminder on very wide terminals.
 - The full authoritative list of keys (including mouse) lives in the F1 Help modal.
@@ -254,6 +256,7 @@ pub struct Node {
     pub selected: bool,
     pub action_mode: ActionMode, // can be repurposed
     pub symlink_status: SymlinkStatus, // or your domain status
+    pub has_configured_descendant: bool, // display-only; set at flatten
 }
 
 pub enum NodeKind {
@@ -272,14 +275,15 @@ Use the exact tree prefix logic and visible-child filtering from `src/tree.rs`.
 - Stateful `List` with `highlight_style(theme.selected)`.
 - Per-row structure (left to right):
   1. Checkbox: `[ ] ` or `[✓] `
-  2. Status icon (✓ ✗ ? or app-specific + subtree badges ◌ ●)
+  2. Status icon (`✓` valid, `○` planned / assigned dest not on disk, `✗` broken, `?` unknown, plus subtree badges `◌` `●`)
   3. Mode label `[LINK] ` / `[COPY] ` (or your equivalent)
-  4. Name (tree-prefixed) with folder/file color + optional ● badge
-- Dynamic title: `Source [N selected / M]` or `Source (filter: xxx)  [N selected / M]`
+  4. Name (tree-prefixed) with folder/file color + optional `●` badge + optional dim planned dest suffix (` → dest`) as a **separate span**, not part of `node.name`
+- Dynamic title: idle `Source  [N]`; filter set `Source (filter: foo)  [N]`; editing `Source (filter: foo█)  [N]`. Long filters left-truncate with `…` so the cursor stays visible.
+- `/` **focuses the inline title filter and does not clear it**. There is no covering Search modal. Esc while editing restores the previous filter and flattens.
 - Bordered block using `active_border` + `body` style.
 - Right-edge `Scrollbar` (VerticalRight, no symbols) when content overflows, driven by `list_state.offset()`.
 
-**Always** capture `state.source_area = area;` at the start of the draw function for mouse hit-testing.
+**Always** capture `state.pointer.source_area = area;` at the start of the draw function for mouse hit-testing.
 
 ### Interaction (both keyboard & mouse)
 **Keyboard (core set that must be supported)**
@@ -288,26 +292,28 @@ Use the exact tree prefix logic and visible-child filtering from `src/tree.rs`.
 - h/l / arrows: expand/collapse folder
 - Enter: activate (usually opens a destination / action browser)
 - m/M: toggle action mode (single or bulk)
-- / : open filter
-- G / g (Ctrl-g top): jumps
+- / : focus inline filter (does not clear; graphic chars including `q` insert while editing)
+- Esc: never quit; restore filter while editing, else clear filter / selection
+- G / Ctrl-g top: jumps
 - r : reload
 
 **Mouse (full support required for consistency)**
 - Capture `source_area` every frame.
-- Checkbox zone (left ~4 cols): toggle select
-- Tree connector / glyph zone on folders (roughly cols 12-18): toggle expand
-- Name area + double-click (420ms exact position, name_part): activate
+- Zones come from `source_row_zones(tree_prefix, name, planned_dest_suffix)` in `src/input/hit_test.rs` — widths are measured from the same strings draw emits, not magic columns (`rel_x < 4`, `12..=18`, `>= 17`).
+- Checkbox zone: toggle select
+- Tree connector zone on folders: toggle expand
+- Name zone includes the optional planned dest suffix; double-click (420ms exact position) activates
 - Wheel (only over source area): scroll with Shift = faster
 - Right-edge scrollbar: drag or click to scroll (proportional, works even if mouse leaves the column while button held)
 - Shift+click: range multi-select
 - Maintain `last_mouse_click_pos` for double-click detection and `scrollbar_dragging` flag.
 
-See the detailed zone calculations and helpers in `src/inputs.rs` (`hit_test_source_row`, `is_folder_glyph`, `update_source_scrollbar`, etc.).
+See `src/input/hit_test.rs` (`source_row_zones`, `split_tree_prefix`) and `src/input/mouse.rs`.
 
 ### Theming for Source Panel
 Use these tokens (in addition to the shell ones):
 - `folder` / `file` for names
-- `valid` / `broken` / `highlight` for status icons
+- `valid` / `broken` / `highlight` / `info` or `secondary` (planned `○`) for status icons
 - `links` or `valid` for action mode labels
 - `secondary` for ● / ◌ badges
 - `scrollbar` for the tree scrollbar
@@ -362,6 +368,6 @@ This standard is currently at **v1**. Bump the version here and in the individua
 
 **Follow this document and your apps will feel like a family, not a collection of unrelated tools.**
 
-For the most up-to-date concrete code, always look at the current implementation inside dd_dotstore (`src/ui.rs`, `src/tree.rs`, `src/state.rs`, `src/inputs.rs`, `src/app.rs`) and the sample theme files.
+For the most up-to-date concrete code, always look at the current implementation inside dd_dotstore (`src/ui/`, `src/tree.rs`, `src/domain/`, `src/theme.rs`, `src/input/`, `src/app.rs`) and the sample theme file `dd_dotstore_theme.yml`.
 
 If a new UI element appears that needs a color or layout convention, propose the addition here first before implementing it in a single app.

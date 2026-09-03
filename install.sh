@@ -4,7 +4,7 @@ set -euo pipefail
 APP_NAME="dd_dotstore"
 THEME_FILE_NAME="dd_dotstore_theme.yml"
 THEME_DIR_NAME="ldnddev"
-MIN_RUST_VERSION="1.70.0"
+MIN_RUST_VERSION="1.85.0"
 
 usage() {
   cat <<USAGE

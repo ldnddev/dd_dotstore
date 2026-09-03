@@ -167,6 +167,71 @@ colors:
 }
 
 #[test]
+fn load_theme_honors_xdg_config_home() {
+    let project = TempRoot::create("theme_xdg_project");
+    let xdg = TempRoot::create("theme_xdg_config");
+    let theme_dir = xdg.join("ldnddev");
+    fs::create_dir_all(&theme_dir).expect("xdg theme dir");
+    fs::write(
+        theme_dir.join("dd_dotstore_theme.yml"),
+        r##"
+version: 1
+colors:
+  base_background: "#AABBCC"
+  body_background: "#111213"
+  modal_background: "#212223"
+  text_primary: "#313233"
+  text_secondary: "#414243"
+  text_labels: "#515253"
+  text_active_focus: "#616263"
+  modal_labels: "#717273"
+  modal_text: "#818283"
+  selected_background: "#919293"
+  border_default: "#A1A2A3"
+  border_active: "#B1B2B3"
+  scrollbar: "#C1C2C3"
+  scrollbar_hover: "#D1D2D3"
+  input_border_default: "#E1E2E3"
+  input_border_focus: "#F1F2F3"
+  input_text_default: "#0A0B0C"
+  input_text_focus: "#1A1B1C"
+  cursor: "#2A2B2C"
+  success: "#3A3B3C"
+  warning: "#4A4B4C"
+  error: "#5A5B5C"
+  info: "#6A6B6C"
+  folders: "#7A7B7C"
+  files: "#8A8B8C"
+  links: "#9A9B9C"
+"##,
+    )
+    .expect("write xdg theme");
+
+    struct RestoreXdg(Option<std::ffi::OsString>);
+    impl Drop for RestoreXdg {
+        fn drop(&mut self) {
+            // SAFETY: restores process env after this test.
+            unsafe {
+                match &self.0 {
+                    Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+                    None => std::env::remove_var("XDG_CONFIG_HOME"),
+                }
+            }
+        }
+    }
+    let _restore = RestoreXdg(std::env::var_os("XDG_CONFIG_HOME"));
+    // SAFETY: unique temp dir; RestoreXdg puts the previous value back.
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", xdg.as_path());
+    }
+
+    let theme = load_theme(&project).expect("load xdg theme");
+    assert_eq!(theme.source, ThemeSource::Global);
+    assert_eq!(theme.version, 1);
+    assert_eq!(theme.colors.base_background, Color::Rgb(0xaa, 0xbb, 0xcc));
+}
+
+#[test]
 fn create_and_remove_symlink_round_trip() {
     let root = TempRoot::create("links");
     fs::write(root.join(".vimrc"), "set number").expect("write dotfile");

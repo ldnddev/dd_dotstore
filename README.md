@@ -85,8 +85,9 @@ cargo run
 cargo run -- --root /path/to/dotfiles
 cargo run -- /path/to/dotfiles
 
-# CLI help
+# CLI help / version
 cargo run -- --help
+cargo run -- --version
 
 # Release build
 cargo build --release
@@ -95,11 +96,11 @@ cargo build --release
 
 ## Theme
 
-`dd_dotstore` uses the shared ldnddev TUI theme system (and overall visual standard) defined in `LDNDDEV_TUI_VISUAL_STANDARD.md` (which incorporates the original `THEME_STRUCTURE_STANDARD.md`).
+`dd_dotstore` uses the shared ldnddev TUI theme system (and overall visual standard) defined in `LDNDDEV_TUI_VISUAL_STANDARD.md`.
 
 Theme lookup order:
 1. `./dd_dotstore_theme.yml`
-2. `~/.config/ldnddev/dd_dotstore_theme.yml`
+2. `$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml` (`XDG_CONFIG_HOME` defaults to `~/.config`)
 3. Built-in defaults
 
 Theme files must include the supported schema version:
@@ -125,7 +126,7 @@ The credits modal shows the active theme source as `local`, `global`, or `defaul
 
 All future ldnddev TUI tools (such as dd_ftp) are expected to follow the same standard for a consistent user experience.
 
-See also the older supporting doc: `THEME_STRUCTURE_STANDARD.md` (now incorporated into the master document). `HEADER_FOOTER_GUIDE.md` and `SOURCE_PANEL_GUIDE.md` have been removed.
+`HEADER_FOOTER_GUIDE.md` and `SOURCE_PANEL_GUIDE.md` have been removed; this file is the remaining visual contract.
 
 ## Install
 
@@ -145,7 +146,7 @@ XDG_CONFIG_HOME="$HOME/.config" ./install.sh
 dd_dotstore --help
 ```
 
-The installer requires Rust 1.70+ and `cargo`. It warns if the target bin directory is not on `PATH`.
+The installer requires Rust 1.85+ (edition 2024) and `cargo`. It warns if the target bin directory is not on `PATH`.
 
 ## Uninstall
 
@@ -172,6 +173,6 @@ MIT License
 Config saved as .dd_dotstore.json in project root
 Undo history capped at 10, persisted
 Ignores common dirs/files by default (.git, node_modules, target, etc.)
-Requires Rust 1.70+ and unix-like OS (symlinks)
+Requires Rust 1.85+ (edition 2024) and unix-like OS (symlinks)
 
 **Enjoy managing your dotfiles.**
