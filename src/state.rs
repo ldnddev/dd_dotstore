@@ -765,10 +765,6 @@ impl AppState {
         }
     }
 
-    pub fn has_selected(&self) -> bool {
-        self.nodes.iter().any(|n| n.selected)
-    }
-
     pub fn update_symlink_statuses(&mut self) -> Result<()> {
         crate::tree::update_symlink_statuses_recursive(&mut self.tree, &self.project_root);
         crate::tree::flatten_visible(self);

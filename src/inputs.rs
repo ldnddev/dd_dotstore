@@ -1035,7 +1035,7 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
         }
 
         Some(Modal::Plan { action, scroll }) => {
-            // Inside click is a no-op (same as PR 2 confirm/overwrite). Wheel may scroll.
+            // Inside click must neither apply nor dismiss; wheel may scroll.
             if matches!(
                 mouse.kind,
                 MouseEventKind::ScrollUp | MouseEventKind::ScrollDown

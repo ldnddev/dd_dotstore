@@ -134,11 +134,12 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
                 name.push_str(" ●");
             }
 
+            let name_width = name.chars().count();
             let mut spans = vec![
                 Span::styled(prefix, state.theme.normal),
                 Span::styled(icon, icon_style),
                 Span::styled(format!("[{}] ", node.action_mode.label()), mode_style),
-                Span::styled(name.clone(), name_style),
+                Span::styled(name, name_style),
             ];
             let dest_none = matches!(
                 &node.kind,
@@ -148,7 +149,7 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
                 let planned = crate::actions::planned_dest(state, node);
                 let suffix = format!(" → {}", planned.display());
                 let inner = area.width.saturating_sub(2) as usize;
-                let used = prefix.chars().count() + icon.chars().count() + 7 + name.chars().count();
+                let used = prefix.chars().count() + icon.chars().count() + 7 + name_width;
                 let max_suffix = inner.saturating_sub(used);
                 if max_suffix > 0 {
                     spans.push(Span::styled(

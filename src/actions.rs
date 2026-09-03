@@ -172,11 +172,10 @@ fn remove_deployed_item(state: &mut AppState, rel_src: &Path) -> Result<bool> {
         match &mut node.kind {
             NodeKind::File { dest } | NodeKind::Folder { dest, .. } => {
                 // Never guess a dest on remove — dest None is a no-op.
-                old_dest = dest.clone();
-                if let Some(dest_path) = old_dest.as_ref() {
+                if let Some(dest_path) = dest.as_ref() {
                     removed = remove_destination_for_mode(dest_path, node.action_mode)?;
                 }
-                *dest = None;
+                old_dest = dest.take();
             }
         }
     }
@@ -304,11 +303,16 @@ pub fn action_targets(state: &AppState) -> Vec<PathBuf> {
 }
 
 fn action_target_nodes(state: &AppState) -> Vec<&Node> {
-    let paths = action_targets(state);
-    paths
-        .iter()
-        .filter_map(|p| state.nodes.iter().find(|n| n.path == *p))
-        .collect()
+    let selected: Vec<_> = state.nodes.iter().filter(|n| n.selected).collect();
+    if !selected.is_empty() {
+        return selected;
+    }
+    state
+        .list_state
+        .selected()
+        .and_then(|i| state.nodes.get(i))
+        .map(|n| vec![n])
+        .unwrap_or_default()
 }
 
 fn node_assigned_dest(node: &Node) -> Option<&Path> {
