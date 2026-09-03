@@ -103,7 +103,7 @@ Click inside a confirm/overwrite/plan dialog is a no-op; click outside cancels. 
 - `.dd_dotstore.json` in the project root: `symlinks`, `modes`, `history`, `ignore_patterns`
 - `save` walks the live tree via `collect_assignments` (dest `Some` only; non-default modes only)
 - Idle auto-save: `mark_dirty` → 300 ms idle in `tick` → `persist_now`. Immediate flush after bulk apply, undo, import, ignore add/delete
-- Save failures toast once per message and retry every 5 s; clean exit uses `persist_now_if_dirty` after tty restore
+- Save failures toast once per message and retry every 5 s. Clean exit: `persist_now_if_dirty` while the TUI is still up, restore the tty, then `eprintln` the save error if any
 - `rebuild_tree(LiveTree | Persisted)` is the single rebuild path (init, `r`, reload, import, ignore-edit)
 - Missing `modes` / `ignore_patterns` keys deserialize to default. Import copies ignores only when `Some`
 

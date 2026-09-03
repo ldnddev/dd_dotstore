@@ -272,14 +272,20 @@ struct ThemeFile {
 }
 
 pub fn load_theme(project_root: &Path) -> Result<Theme> {
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    load_theme_with(project_root, config_home.as_deref())
+}
+
+/// Same lookup as `load_theme`, with config-home injected so tests do not
+/// mutate process-global `XDG_CONFIG_HOME`.
+pub fn load_theme_with(project_root: &Path, config_home: Option<&Path>) -> Result<Theme> {
     let local = project_root.join(THEME_FILE_NAME);
     if local.exists() {
         return load_theme_file(&local, ThemeSource::Local);
     }
 
-    let config_home = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
     if let Some(config_home) = config_home {
         let global = config_home.join("ldnddev").join(THEME_FILE_NAME);
         if global.exists() {
@@ -303,7 +309,7 @@ fn load_theme_file(path: &Path, source: ThemeSource) -> Result<Theme> {
             path.display()
         ));
     }
-    let colors = parse_theme_colors(file.colors.as_ref())
+    let colors = parse_theme_colors(file.colors)
         .with_context(|| format!("Failed to parse theme file: {}", path.display()))?;
     let mut header_quotes = file.header_quotes;
     if header_quotes.is_empty() {
@@ -340,14 +346,15 @@ fn parse_theme_version(version: &Option<serde_yaml::Value>) -> Result<u64> {
     }
 }
 
-fn parse_theme_colors(colors: Option<&HashMap<String, String>>) -> Result<ThemeColors> {
-    let raw = colors.cloned().unwrap_or_default();
+fn parse_theme_colors(colors: Option<HashMap<String, String>>) -> Result<ThemeColors> {
+    let raw = colors.unwrap_or_default();
     let mut values: HashMap<String, Color> = HashMap::new();
-    for (key, value) in &raw {
+    for (key, value) in raw {
         if value.trim().is_empty() {
             return Err(anyhow!("Missing color value for theme key `{key}`"));
         }
-        values.insert(key.clone(), parse_hex_color(key, value)?);
+        let color = parse_hex_color(&key, &value)?;
+        values.insert(key, color);
     }
 
     macro_rules! color {

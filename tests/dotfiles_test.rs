@@ -10,7 +10,7 @@ use dd_dotstore::app::App;
 use dd_dotstore::inputs::{handle_key, handle_mouse};
 use dd_dotstore::state::{
     Action, BrowserState, BulkAction, DirEntry, Modal, NodeKind, SymlinkStatus, ThemeSource,
-    load_theme,
+    load_theme, load_theme_with,
 };
 use dd_dotstore::toast::{TOAST_DURATION, ToastLevel};
 use dd_dotstore::tree::{build_tree, find_node, flatten_visible};
@@ -207,25 +207,7 @@ colors:
     )
     .expect("write xdg theme");
 
-    struct RestoreXdg(Option<std::ffi::OsString>);
-    impl Drop for RestoreXdg {
-        fn drop(&mut self) {
-            // SAFETY: restores process env after this test.
-            unsafe {
-                match &self.0 {
-                    Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-                    None => std::env::remove_var("XDG_CONFIG_HOME"),
-                }
-            }
-        }
-    }
-    let _restore = RestoreXdg(std::env::var_os("XDG_CONFIG_HOME"));
-    // SAFETY: unique temp dir; RestoreXdg puts the previous value back.
-    unsafe {
-        std::env::set_var("XDG_CONFIG_HOME", xdg.as_path());
-    }
-
-    let theme = load_theme(&project).expect("load xdg theme");
+    let theme = load_theme_with(&project, Some(xdg.as_path())).expect("load xdg theme");
     assert_eq!(theme.source, ThemeSource::Global);
     assert_eq!(theme.version, 1);
     assert_eq!(theme.colors.base_background, Color::Rgb(0xaa, 0xbb, 0xcc));
