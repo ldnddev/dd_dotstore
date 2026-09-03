@@ -1,4 +1,4 @@
-use crate::state::{ActionMode, AppState, Node, NodeKind, SymlinkStatus};
+use crate::domain::{ActionMode, AppState, Node, NodeKind, SymlinkStatus};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -46,6 +46,7 @@ pub fn build_tree(root: &Path, ignores: &[String]) -> Vec<Node> {
                 selected: false,
                 action_mode: ActionMode::Symlink,
                 symlink_status: SymlinkStatus::None,
+                has_configured_descendant: false,
             };
 
             if matches!(node.kind, NodeKind::Folder { .. }) {
@@ -110,8 +111,12 @@ fn flatten_emit(
     }
 
     let mut display = node.clone();
-    // PR 5: set has_configured_descendant from the live node, switch draw to that
-    // flag, then children.clear() on the display clone. Do not clear before that.
+    // Capture badge data from the live node, then shrink the display clone.
+    // Draw reads has_configured_descendant instead of walking Folder.children.
+    display.has_configured_descendant = subtree_has_destination(node);
+    if let NodeKind::Folder { children, .. } = &mut display.kind {
+        children.clear();
+    }
     let connector = if depth == 0 {
         ""
     } else if is_last {
@@ -191,7 +196,7 @@ pub fn flatten_visible(state: &mut AppState) {
     }
 }
 
-fn fuzzy_match(candidate: &str, query: &[char]) -> bool {
+pub fn fuzzy_match(candidate: &str, query: &[char]) -> bool {
     if query.is_empty() {
         return true;
     }
@@ -205,6 +210,14 @@ fn fuzzy_match(candidate: &str, query: &[char]) -> bool {
         }
     }
     false
+}
+
+pub fn subtree_has_destination(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::File { dest: Some(_) } | NodeKind::Folder { dest: Some(_), .. } => true,
+        NodeKind::Folder { children, .. } => children.iter().any(subtree_has_destination),
+        _ => false,
+    }
 }
 
 pub fn find_mut_node<'a>(nodes: &'a mut [Node], target: &Path) -> Option<&'a mut Node> {

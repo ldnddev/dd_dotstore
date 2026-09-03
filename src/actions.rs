@@ -1,6 +1,8 @@
-use crate::state::{Action, ActionMode, AppState, BulkAction, Conflict, Modal, Node, NodeKind};
-use crate::toast::ToastLevel;
+use crate::domain::{
+    Action, ActionMode, AppState, BulkAction, Conflict, HISTORY_CAP, Modal, Node, NodeKind,
+};
 use crate::tree::{find_mut_node, find_node, flatten_visible, set_action_mode, set_dest};
+use crate::ui::toast::ToastLevel;
 use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 use std::fs;
@@ -12,7 +14,7 @@ use std::os::unix::fs as unix_fs;
 
 pub fn push_history(state: &mut AppState, action: Action) {
     state.history.push_back(action);
-    while state.history.len() > 10 {
+    while state.history.len() > HISTORY_CAP {
         state.history.pop_front();
     }
 }
@@ -596,7 +598,7 @@ fn sorted_import_candidates(read_dir: fs::ReadDir) -> Vec<PathBuf> {
 }
 
 pub fn import_from_path(state: &mut AppState, import_path: &Path) -> Result<()> {
-    let imported = crate::state::load_persistent(import_path)?;
+    let imported = crate::domain::load_persistent(import_path)?;
     state.persisted_symlinks = imported.symlinks;
     state.persisted_modes = imported.modes;
     state.history = imported.history.into_iter().collect();
@@ -630,7 +632,7 @@ pub fn open_export_picker(state: &mut AppState) -> Result<()> {
 }
 
 pub fn export_to_path(state: &mut AppState, export_path: &Path) -> Result<()> {
-    crate::state::save(state, export_path)?;
+    crate::domain::save(state, export_path)?;
     state.mark_dirty();
     state.show_toast(
         ToastLevel::Success,
@@ -647,29 +649,43 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_path(prefix: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        std::env::temp_dir().join(format!("{}_{}_{}", prefix, std::process::id(), nanos))
+    struct TempRoot {
+        path: PathBuf,
+    }
+
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    impl TempRoot {
+        fn new(prefix: &str) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "dd_dotstore_test_{prefix}_{}_{nanos}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("create temp root");
+            Self { path }
+        }
     }
 
     #[test]
     fn import_candidates_are_sorted_newest_first() {
-        let root = temp_path("dd_dotstore_actions_sort");
-        fs::create_dir_all(&root).expect("create root");
-        let old = root.join("a.json");
-        let new = root.join("b.json");
+        let root = TempRoot::new("actions_sort");
+        let old = root.path.join("a.json");
+        let new = root.path.join("b.json");
         fs::write(&old, "{}").expect("write old");
         std::thread::sleep(std::time::Duration::from_millis(5));
         fs::write(&new, "{}").expect("write new");
 
-        let read_dir = fs::read_dir(&root).expect("read dir");
+        let read_dir = fs::read_dir(&root.path).expect("read dir");
         let files = sorted_import_candidates(read_dir);
         assert_eq!(files.first(), Some(&new));
         assert_eq!(files.get(1), Some(&old));
-
-        let _ = fs::remove_dir_all(root);
     }
 }
