@@ -1,4 +1,4 @@
-use crate::domain::{AppState, Node, NodeKind};
+use crate::domain::{ActionMode, AppState, Node, NodeKind};
 use ratatui::layout::Rect;
 use std::ops::Range;
 
@@ -10,8 +10,12 @@ pub const ICON_BROKEN: &str = "✗ ";
 pub const ICON_PLANNED: &str = "○ ";
 pub const ICON_UNKNOWN: &str = "? ";
 pub const ICON_SUBTREE: &str = "◌ ";
-pub const MODE_LINK: &str = "[LINK] ";
 pub const BADGE_CONFIGURED: &str = " ●";
+
+/// Same cell draw emits and `source_row_zones` measures. LINK/COPY are both 4 letters.
+pub fn mode_label(mode: ActionMode) -> String {
+    format!("[{}] ", mode.label())
+}
 
 pub struct SourceRowZones {
     pub checkbox: Range<u16>, // "[ ] " / "[✓] "
@@ -41,7 +45,7 @@ pub fn source_row_zones(
     let icon = x..(x + icon_w);
     x += icon_w;
 
-    let mode_w = str_width(MODE_LINK);
+    let mode_w = str_width(&mode_label(ActionMode::Symlink));
     let mode = x..(x + mode_w);
     x += mode_w;
 

@@ -110,13 +110,26 @@ fn flatten_emit(
         return;
     }
 
-    let mut display = node.clone();
-    // Capture badge data from the live node, then shrink the display clone.
-    // Draw reads has_configured_descendant instead of walking Folder.children.
-    display.has_configured_descendant = subtree_has_destination(node);
-    if let NodeKind::Folder { children, .. } = &mut display.kind {
-        children.clear();
-    }
+    // Flag from the live node, then a display row with empty children — do not
+    // clone Folder.children only to throw them away.
+    let has_configured_descendant = subtree_has_destination(node);
+    let kind = match &node.kind {
+        NodeKind::File { dest } => NodeKind::File { dest: dest.clone() },
+        NodeKind::Folder { expanded, dest, .. } => NodeKind::Folder {
+            children: Vec::new(),
+            expanded: *expanded,
+            dest: dest.clone(),
+        },
+    };
+    let mut display = Node {
+        name: node.name.clone(),
+        path: node.path.clone(),
+        kind,
+        selected: node.selected,
+        action_mode: node.action_mode,
+        symlink_status: node.symlink_status,
+        has_configured_descendant,
+    };
     let connector = if depth == 0 {
         ""
     } else if is_last {

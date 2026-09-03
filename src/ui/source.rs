@@ -1,7 +1,7 @@
 use crate::domain::{ActionMode, AppState, NodeKind, SymlinkStatus};
 use crate::input::hit_test::{
     CHECKBOX_CHECKED, CHECKBOX_UNCHECKED, ICON_BROKEN, ICON_NONE, ICON_PLANNED, ICON_SUBTREE,
-    ICON_UNKNOWN, ICON_VALID, display_name_and_badge, planned_suffix_for_row,
+    ICON_UNKNOWN, ICON_VALID, display_name_and_badge, mode_label, planned_suffix_for_row,
 };
 use ratatui::{
     Frame,
@@ -101,7 +101,7 @@ pub(crate) fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect)
             let mut spans = vec![
                 Span::styled(prefix, state.theme.normal),
                 Span::styled(icon, icon_style),
-                Span::styled(format!("[{}] ", node.action_mode.label()), mode_style),
+                Span::styled(mode_label(node.action_mode), mode_style),
                 Span::styled(label, name_style),
             ];
             if let Some(suffix) = planned_suffix_for_row(state, node, inner_width) {

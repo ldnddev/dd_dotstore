@@ -1311,28 +1311,38 @@ fn flatten_clears_display_children_after_badge_flag() {
         "badge flag must be set from the live node"
     );
     match &display.kind {
-        NodeKind::Folder { children, .. } => {
+        NodeKind::Folder { dest, children, .. } => {
             assert!(
                 children.is_empty(),
                 "display clone children must be cleared"
             );
+            assert!(dest.is_none());
         }
         NodeKind::File { .. } => panic!("expected folder"),
     }
+    assert_eq!(display.symlink_status, SymlinkStatus::None);
+    let (_, badge_name) = dd_dotstore::input::hit_test::display_name_and_badge(display);
+    assert!(
+        badge_name.ends_with(dd_dotstore::input::hit_test::BADGE_CONFIGURED),
+        "shrunk dest-less folder with configured descendants must still render ●: {badge_name:?}"
+    );
 }
 
 #[test]
 fn source_row_zones_cover_checkbox_tree_and_planned_suffix() {
     use dd_dotstore::input::source_row_zones;
-    let zones = source_row_zones("├─ ", "match.txt", Some(" → /tmp/dest"));
+    let suffix = " → /tmp/dest";
+    let without = source_row_zones("├─ ", "match.txt", None);
+    let zones = source_row_zones("├─ ", "match.txt", Some(suffix));
     assert_eq!(zones.checkbox, 0..4);
     assert_eq!(zones.icon, 4..6);
     assert_eq!(zones.mode, 6..13);
     assert_eq!(zones.tree, 13..16);
-    assert!(zones.name.contains(&16), "name starts after tree");
-    assert!(
-        zones.name.end > zones.tree.end,
-        "planned dest suffix is part of the name zone"
+    assert_eq!(zones.name.start, without.name.start);
+    assert_eq!(
+        zones.name.end,
+        without.name.end + suffix.chars().count() as u16,
+        "planned dest suffix must extend the name zone"
     );
     assert!(!zones.tree.contains(&0), "checkbox is not the tree zone");
 }
