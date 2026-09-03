@@ -1,6 +1,6 @@
-use crate::state::{Action, ActionMode, AppState, BulkAction, Conflict, Modal, NodeKind};
+use crate::state::{Action, ActionMode, AppState, BulkAction, Conflict, Modal, Node, NodeKind};
 use crate::toast::ToastLevel;
-use crate::tree::{find_mut_node, flatten_visible, set_action_mode, set_dest};
+use crate::tree::{find_mut_node, find_node, flatten_visible, set_action_mode, set_dest};
 use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 use std::fs;
@@ -170,19 +170,9 @@ fn remove_deployed_item(state: &mut AppState, rel_src: &Path) -> Result<bool> {
     if let Some(node) = find_mut_node(&mut state.tree, rel_src) {
         removed_mode = node.action_mode;
         match &mut node.kind {
-            NodeKind::File { dest } => {
-                old_dest = dest
-                    .clone()
-                    .or_else(|| Some(state.project_root.join(".linked").join(rel_src)));
-                if let Some(dest_path) = old_dest.as_ref() {
-                    removed = remove_destination_for_mode(dest_path, node.action_mode)?;
-                }
-                *dest = None;
-            }
-            NodeKind::Folder { dest, .. } => {
-                old_dest = dest
-                    .clone()
-                    .or_else(|| Some(state.project_root.join(".linked").join(rel_src)));
+            NodeKind::File { dest } | NodeKind::Folder { dest, .. } => {
+                // Never guess a dest on remove — dest None is a no-op.
+                old_dest = dest.clone();
                 if let Some(dest_path) = old_dest.as_ref() {
                     removed = remove_destination_for_mode(dest_path, node.action_mode)?;
                 }
@@ -229,6 +219,104 @@ fn remove_destination_for_mode(dest_path: &Path, action_mode: ActionMode) -> Res
     Ok(false)
 }
 
+pub fn default_dest(project_root: &Path, rel: &Path, is_dir: bool) -> PathBuf {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        // Do not target /.bashrc. Unset HOME → last-resort fallback.
+        return fallback_linked(project_root, rel);
+    };
+    let xdg_config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+    default_dest_with(&home, &xdg_config, project_root, rel, is_dir)
+}
+
+pub fn default_dest_with(
+    home: &Path,
+    xdg_config: &Path,
+    project_root: &Path,
+    rel: &Path,
+    is_dir: bool,
+) -> PathBuf {
+    let mut comps = rel.components();
+    let Some(first) = comps.next() else {
+        return fallback_linked(project_root, rel);
+    };
+    let first_s = first.as_os_str();
+
+    if first_s == ".config" {
+        let rest: PathBuf = comps.collect();
+        if rest.as_os_str().is_empty() {
+            // Directory named .config → XDG. File named .config → $HOME/.config.
+            return if is_dir {
+                xdg_config.to_path_buf()
+            } else {
+                home.join(".config")
+            };
+        }
+        return xdg_config.join(rest);
+    }
+
+    let is_single = comps.next().is_none();
+    if is_single {
+        let name = Path::new(first_s);
+        let name_str = name.to_string_lossy();
+        if is_dir && !name_str.starts_with('.') {
+            return xdg_config.join(name); // nvim/ → ~/.config/nvim
+        }
+        return home.join(name); // .bashrc, .ssh/, README.md, .config file
+    }
+
+    fallback_linked(project_root, rel)
+}
+
+fn fallback_linked(project_root: &Path, rel: &Path) -> PathBuf {
+    project_root.join(".linked").join(rel)
+}
+
+/// Assigned dest if any, else default_dest. Create-path only.
+pub fn planned_dest(state: &AppState, node: &Node) -> PathBuf {
+    let is_dir = matches!(node.kind, NodeKind::Folder { .. });
+    match &node.kind {
+        NodeKind::File { dest: Some(d) } | NodeKind::Folder { dest: Some(d), .. } => d.clone(),
+        NodeKind::File { dest: None } | NodeKind::Folder { dest: None, .. } => {
+            default_dest(&state.project_root, &node.path, is_dir)
+        }
+    }
+}
+
+/// Checkboxes if any, else the highlighted row. Does not flip selection.
+pub fn action_targets(state: &AppState) -> Vec<PathBuf> {
+    let selected: Vec<_> = state
+        .nodes
+        .iter()
+        .filter(|n| n.selected)
+        .map(|n| n.path.clone())
+        .collect();
+    if !selected.is_empty() {
+        return selected;
+    }
+    state
+        .list_state
+        .selected()
+        .and_then(|i| state.nodes.get(i))
+        .map(|n| vec![n.path.clone()])
+        .unwrap_or_default()
+}
+
+fn action_target_nodes(state: &AppState) -> Vec<&Node> {
+    let paths = action_targets(state);
+    paths
+        .iter()
+        .filter_map(|p| state.nodes.iter().find(|n| n.path == *p))
+        .collect()
+}
+
+fn node_assigned_dest(node: &Node) -> Option<&Path> {
+    match &node.kind {
+        NodeKind::File { dest } | NodeKind::Folder { dest, .. } => dest.as_deref(),
+    }
+}
+
 pub fn confirm_bulk(state: &mut AppState, action: BulkAction) -> Result<()> {
     confirm_bulk_with_overwrite(state, action, false)
 }
@@ -238,24 +326,25 @@ pub fn confirm_bulk_with_overwrite(
     action: BulkAction,
     overwrite_real_files: bool,
 ) -> Result<()> {
-    let selected_paths: Vec<_> = state
-        .nodes
-        .iter()
-        .filter(|n| n.selected)
-        .map(|n| n.path.clone())
-        .collect();
+    let selected_paths = action_targets(state);
 
     for rel in selected_paths {
         match action {
             BulkAction::Create => {
-                let fallback = state.project_root.join(".linked").join(&rel);
-                let (dest, action_mode) = find_mut_node(&mut state.tree, &rel)
-                    .map(|n| match &n.kind {
-                        NodeKind::File { dest } => (dest.clone(), n.action_mode),
-                        NodeKind::Folder { dest, .. } => (dest.clone(), n.action_mode),
+                let Some((assigned, is_dir, path, action_mode)) =
+                    find_node(&state.tree, &rel).map(|n| {
+                        (
+                            node_assigned_dest(n).map(Path::to_path_buf),
+                            matches!(n.kind, NodeKind::Folder { .. }),
+                            n.path.clone(),
+                            n.action_mode,
+                        )
                     })
-                    .map(|(dest, action_mode)| (dest.unwrap_or(fallback.clone()), action_mode))
-                    .unwrap_or((fallback, ActionMode::Symlink));
+                else {
+                    continue;
+                };
+                let dest =
+                    assigned.unwrap_or_else(|| default_dest(&state.project_root, &path, is_dir));
 
                 match action_mode {
                     ActionMode::Symlink => {
@@ -288,94 +377,83 @@ pub fn confirm_bulk_with_overwrite(
 }
 
 /// Collect human-readable preview lines for what a bulk action would do.
-/// Used for safety/preview/dry-run modals.
+/// DIR overwrite lines are first; the vec is not truncated (Plan modal scrolls).
 pub fn collect_preview_lines(state: &AppState, action: BulkAction) -> Vec<String> {
-    let selected: Vec<_> = state.nodes.iter().filter(|n| n.selected).collect();
+    let targets = action_target_nodes(state);
 
-    if selected.is_empty() {
+    if targets.is_empty() {
         return vec!["(no items selected)".to_string()];
     }
 
-    let mut lines = Vec::new();
+    let mut items: Vec<(bool, String)> = Vec::new();
 
-    for node in &selected {
+    for node in targets {
         match action {
             BulkAction::Create => {
-                let fallback = state.project_root.join(".linked").join(&node.path);
-                let (dest, mode) = match &node.kind {
-                    NodeKind::File { dest } => {
-                        (dest.clone().unwrap_or(fallback.clone()), node.action_mode)
-                    }
-                    NodeKind::Folder { dest, .. } => {
-                        (dest.clone().unwrap_or(fallback.clone()), node.action_mode)
-                    }
-                };
-                let arrow = if mode == ActionMode::Symlink {
+                let assigned = node_assigned_dest(node).is_some();
+                let dest = planned_dest(state, node);
+                let arrow = if node.action_mode == ActionMode::Symlink {
                     "->"
                 } else {
                     "=>"
                 };
                 let mut line = format!(
                     "{} {} {} {}",
-                    mode.label(),
+                    node.action_mode.label(),
                     node.path.display(),
                     arrow,
                     dest.display()
                 );
-                // Simple conflict note (real non-symlink for create)
+                let mut is_overwrite_dir = false;
                 if let Ok(meta) = fs::symlink_metadata(&dest)
-                    && !meta.file_type().is_symlink()
+                    && (node.action_mode == ActionMode::Copy || !meta.file_type().is_symlink())
                 {
-                    line.push_str("  [OVERWRITE REAL FILE]");
+                    if meta.is_dir() {
+                        line.push_str("  [OVERWRITE REAL DIR]");
+                        is_overwrite_dir = true;
+                    } else {
+                        line.push_str("  [OVERWRITE REAL FILE]");
+                    }
                 }
-                lines.push(line);
+                if !assigned && dest == fallback_linked(&state.project_root, &node.path) {
+                    line.push_str("  [fallback: .linked]");
+                }
+                items.push((is_overwrite_dir, line));
             }
             BulkAction::Remove => {
-                if let Some(d) = match &node.kind {
-                    NodeKind::File { dest } => dest.clone(),
-                    NodeKind::Folder { dest, .. } => dest.clone(),
-                } {
+                if let Some(d) = node_assigned_dest(node) {
                     let arrow = if node.action_mode == ActionMode::Symlink {
                         "->"
                     } else {
                         "=>"
                     };
-                    lines.push(format!(
-                        "REMOVE {} {} {} {}",
-                        node.action_mode.label(),
-                        node.path.display(),
-                        arrow,
-                        d.display()
+                    items.push((
+                        false,
+                        format!(
+                            "REMOVE {} {} {} {}",
+                            node.action_mode.label(),
+                            node.path.display(),
+                            arrow,
+                            d.display()
+                        ),
                     ));
                 } else {
-                    lines.push(format!("REMOVE (no dest) {}", node.path.display()));
+                    items.push((false, format!("REMOVE (no dest) {}", node.path.display())));
                 }
             }
         }
     }
 
-    if lines.len() > 8 {
-        let extra = lines.len() - 8;
-        lines.truncate(8);
-        lines.push(format!("... +{} more", extra));
-    }
-
-    lines
+    items.sort_by_key(|(is_dir, _)| !*is_dir);
+    items.into_iter().map(|(_, line)| line).collect()
 }
 
 pub fn selected_create_conflicts(state: &AppState) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
     let mut seen = HashSet::new();
 
-    for node in state.nodes.iter().filter(|n| n.selected) {
-        let dest = match &node.kind {
-            NodeKind::File { dest: Some(d) } => d.clone(),
-            NodeKind::File { dest: None } => state.project_root.join(".linked").join(&node.path),
-            NodeKind::Folder { dest: Some(d), .. } => d.clone(),
-            NodeKind::Folder { dest: None, .. } => {
-                state.project_root.join(".linked").join(&node.path)
-            }
-        };
+    for node in action_target_nodes(state) {
+        let dest = planned_dest(state, node);
 
         if seen.contains(&dest) {
             continue;

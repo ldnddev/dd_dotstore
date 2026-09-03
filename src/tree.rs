@@ -314,11 +314,17 @@ pub fn update_symlink_statuses_recursive(nodes: &mut [Node], root: &Path) {
                             _ => SymlinkStatus::Broken,
                         },
                         Ok(_) => SymlinkStatus::Broken,
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                            SymlinkStatus::Planned
+                        }
                         Err(_) => SymlinkStatus::Unknown,
                     },
                     ActionMode::Copy => match fs::symlink_metadata(dest) {
                         Ok(meta) if meta.file_type().is_symlink() => SymlinkStatus::Broken,
                         Ok(_) => SymlinkStatus::Valid,
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                            SymlinkStatus::Planned
+                        }
                         Err(_) => SymlinkStatus::Unknown,
                     },
                 };

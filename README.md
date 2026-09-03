@@ -16,9 +16,10 @@ TUI tool to manage Linux dotfiles: select project folder, assign destinations, c
 - Shared ldnddev theme support
 - Theme schema version validation (`version: 1`)
 - Startup theme health/status in the footer
-- Symlink status icons (✓ valid, ✗ broken)
+- Symlink status icons (✓ valid, ○ planned, ✗ broken, ? unknown)
+- Smart dest defaults (XDG / `$HOME` / labeled `.linked` fallback) shown dim on the source row
 - Import/export configs (`~/.dd_dotstore/exports/`, newest-first import list)
-- Confirm dialogs + overwrite warnings
+- Unified plan dialog + overwrite warnings (every real DIR named)
 - Passive info/error notices appear as bottom-right toasts for 5 seconds
 - Help (`F1`) and credits (`F2`) modals
 
@@ -33,9 +34,8 @@ Space           Toggle selection (file/folder)
 Enter           Edit destination (file/folder)
 e               Edit destination (file/folder)
 h/l or ←/→      Collapse/expand folder
-s               Apply selected LINK/COPY items (confirm)
-x               Remove selected destinations (confirm)
-p               Preview / dry-run the planned bulk create (shows detailed plan; Y to actually apply)
+s / p           Open the same plan dialog for apply (highlight is enough; Y applies)
+x               Plan remove (highlight is enough; Y applies; never guesses a dest)
 m               Toggle LINK/COPY for highlighted item
 M               Set selected items to the next LINK/COPY mode
 u               Undo last action
@@ -67,11 +67,11 @@ i / E           Import / Export config
 - Enhanced status icons (◌ for folders with subtree destinations)
 - In the destination browser modal: click to move highlight, double-click name to pick/enter a dir, drag or click its scrollbar to scroll the picker list
 - Click outside an open modal: close/cancel the modal
-- Click inside a confirm/overwrite/preview dialog does nothing — use Y
+- Click inside a confirm/overwrite/plan dialog does nothing — use Y
 - Click a toast: dismiss it immediately
 - Import picker: click a row to choose it (press Enter to confirm the import)
 
-Additional polish: Source and Destinations titles show selection/total counts; source tree uses proper Unicode connectors (├ └ │) for better structure visibility.
+Additional polish: Source and Destinations titles show selection/total counts; source tree uses proper Unicode connectors (├ └ │) for better structure visibility. Unassigned source rows show a dim planned dest (` → path`); `○` means an assigned dest is not on disk yet. Nested leftovers fall back to `project/.linked/<path>` and are labeled `[fallback: .linked]` in the plan. `.linked` is ignored as a source. Remove (`x`) never guesses a dest.
 
 Passive notices do not require input. They appear as toasts in the bottom-right corner and disappear after 5 seconds.
 
