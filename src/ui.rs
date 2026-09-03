@@ -80,10 +80,7 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(bar, area);
 }
 
-/// Idle, no filter: `Source  [N]`
-/// Idle, filter set: `Source (filter: foo)  [N]`
-/// Editing: `Source (filter: foo█)  [N]`
-/// Overflow: keep prefix and trailing █/count; left-truncate the filter with `…`.
+/// Left-truncate overflow so the title prefix and trailing cursor/count stay visible.
 fn source_panel_title(
     filter: &str,
     editing: bool,

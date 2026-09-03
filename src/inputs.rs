@@ -272,6 +272,21 @@ fn open_dest_browser(state: &mut AppState) {
     }
 }
 
+fn remove_ignore_at(state: &mut AppState, selected: &mut usize) -> Result<()> {
+    if *selected < state.ignore_patterns.len() {
+        state.ignore_patterns.remove(*selected);
+        if !state.ignore_patterns.is_empty() {
+            *selected = (*selected).min(state.ignore_patterns.len().saturating_sub(1));
+        } else {
+            *selected = 0;
+        }
+        state.mark_dirty();
+        rebuild_tree(state, AssignmentSource::LiveTree)?;
+        state.persist_now_or_toast();
+    }
+    Ok(())
+}
+
 fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     let Some(current_modal) = state.modal.clone() else {
         return Ok(false);
@@ -411,27 +426,29 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             mut draft,
         } => {
             match key.code {
-                KeyCode::Up | KeyCode::Char('k') if key.modifiers.is_empty() => {
+                KeyCode::Up => {
                     selected = selected.saturating_sub(1);
                 }
-                KeyCode::Down | KeyCode::Char('j') if key.modifiers.is_empty() => {
+                KeyCode::Down => {
                     if !state.ignore_patterns.is_empty() {
                         selected =
                             (selected + 1).min(state.ignore_patterns.len().saturating_sub(1));
                     }
                 }
-                KeyCode::Delete | KeyCode::Char('d') if key.modifiers.is_empty() => {
-                    if selected < state.ignore_patterns.len() {
-                        state.ignore_patterns.remove(selected);
-                        if !state.ignore_patterns.is_empty() {
-                            selected = selected.min(state.ignore_patterns.len().saturating_sub(1));
-                        } else {
-                            selected = 0;
-                        }
-                        state.mark_dirty();
-                        rebuild_tree(state, AssignmentSource::LiveTree)?;
-                        state.persist_now_or_toast();
+                KeyCode::Char('k') if key.modifiers.is_empty() && draft.is_empty() => {
+                    selected = selected.saturating_sub(1);
+                }
+                KeyCode::Char('j') if key.modifiers.is_empty() && draft.is_empty() => {
+                    if !state.ignore_patterns.is_empty() {
+                        selected =
+                            (selected + 1).min(state.ignore_patterns.len().saturating_sub(1));
                     }
+                }
+                KeyCode::Delete => {
+                    remove_ignore_at(state, &mut selected)?;
+                }
+                KeyCode::Char('d') if key.modifiers.is_empty() && draft.is_empty() => {
+                    remove_ignore_at(state, &mut selected)?;
                 }
                 KeyCode::Enter => {
                     if !draft.is_empty() {
@@ -450,9 +467,7 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                     return Ok(false);
                 }
                 KeyCode::Char(c)
-                    if key.modifiers.is_empty()
-                        && (c.is_ascii_graphic() || c == ' ')
-                        && !matches!(c, 'j' | 'k' | 'd') =>
+                    if key.modifiers.is_empty() && (c.is_ascii_graphic() || c == ' ') =>
                 {
                     draft.push(c);
                 }

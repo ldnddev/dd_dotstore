@@ -2062,3 +2062,32 @@ fn ignore_editor_add_delete_rebuilds_and_persists() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn ignore_editor_types_d_into_draft_without_deleting() {
+    let root = temp_path("dd_dotstore_test_ignore_editor_type_d");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let before = app.state.ignore_patterns.clone();
+    assert!(before.first().is_some_and(|p| p == ".git"));
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('I'))).expect("open ignore editor");
+    for c in "node_modules".chars() {
+        let _ = handle_key(&mut app.state, key(KeyCode::Char(c))).expect("type draft");
+    }
+    match &app.state.modal {
+        Some(Modal::IgnoreEditor { draft, selected }) => {
+            assert_eq!(draft, "node_modules");
+            assert_eq!(*selected, 0, "j/k while typing must not move the list");
+        }
+        other => panic!("expected IgnoreEditor, got {other:?}"),
+    }
+    assert_eq!(
+        app.state.ignore_patterns, before,
+        "typing d in node_modules must not delete the highlighted pattern"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
