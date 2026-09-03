@@ -1,4 +1,6 @@
-use crate::state::{ActionMode, AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus};
+use crate::state::{
+    ActionMode, AppState, BulkAction, Conflict, Modal, Node, NodeKind, SymlinkStatus,
+};
 use crate::toast::ToastLevel;
 use ratatui::{
     Frame,
@@ -67,9 +69,9 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     let keys = if area.width < 75 {
         "F1:Help  q:Quit  j/k:Nav  Spc:Sel  s:Apply  x:Rem  /:Filter"
     } else if area.width < 110 {
-        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit"
+        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   q: Quit"
     } else {
-        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   Q: Exit   (mouse: click/scroll/drag)"
+        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   q: Quit   (mouse: click/scroll/drag)"
     };
 
     let bar = Paragraph::new(Line::from(keys))
@@ -304,27 +306,28 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
                     .style(state.theme.modal_text);
                 f.render_widget(text, modal_area);
             }
-            Modal::OverwriteWarning { conflicts, .. } => {
-                let real_count = conflicts.iter().filter(|c| c.is_real_file).count();
-                let symlink_count = conflicts.len() - real_count;
-                let mut names = String::new();
-                for conflict in conflicts.iter().take(4) {
-                    if !names.is_empty() {
-                        names.push('\n');
-                    }
-                    names.push_str(&conflict.dest.display().to_string());
-                }
-                let msg = format!(
-                    "{} conflicts: {} real files, {} symlinks.\n{}",
-                    conflicts.len(),
-                    real_count,
-                    symlink_count,
-                    names
+            Modal::OverwriteWarning {
+                conflicts, scroll, ..
+            } => {
+                let (dirs, files, total) = overwrite_warning_counts(conflicts);
+                let title =
+                    format!("Overwrite Warning  ({dirs} dirs, {files} files, {total} total)");
+                let inner_h = modal_area.height.saturating_sub(2) as usize;
+                let list_h = inner_h.saturating_sub(4).max(1);
+                let max_scroll = conflicts.len().saturating_sub(list_h);
+                let scroll = (*scroll).min(max_scroll);
+                let mut body = String::from(
+                    "These real paths will be replaced. Directories will be DELETED (remove_dir_all):\n\n",
                 );
-                let text = Paragraph::new(msg)
+                for conflict in conflicts.iter().skip(scroll).take(list_h) {
+                    body.push_str(&overwrite_conflict_row(conflict));
+                    body.push('\n');
+                }
+                body.push_str("\nY apply / other cancel   j/k scroll");
+                let text = Paragraph::new(body)
                     .block(
                         Block::default()
-                            .title("Overwrite Warning")
+                            .title(title)
                             .borders(Borders::ALL)
                             .border_style(state.theme.error)
                             .style(state.theme.modal),
@@ -423,7 +426,8 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
             Modal::Help => {
                 let help = "Keybindings\n\
 \n\
-q / Esc      Quit\n\
+q / Q        Quit\n\
+Esc          Close modal / clear filter / clear selection (does not quit)\n\
 F1           Toggle help\n\
 F2           Toggle credits\n\
 j/k or ↑/↓   Navigate\n\
@@ -454,6 +458,7 @@ Wheel over right    Scroll Destinations\n\
 Drag right scrollbar Scroll the view\n\
 Click right panel   Jump focus + auto-expand ancestors\n\
 Click outside modal Close it\n\
+Click inside confirm/overwrite does nothing — use Y\n\
 Browser: click moves, double-click picks, scrollbar drag works\n\
 \n\
 Tree: proper connectors (├ └ │) + counts + subtree badges (●) for density.";
@@ -593,6 +598,17 @@ fn draw_toast(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     f.render_widget(Clear, toast_area);
     f.render_widget(text, toast_area);
+}
+
+pub fn overwrite_warning_counts(conflicts: &[Conflict]) -> (usize, usize, usize) {
+    let dirs = conflicts.iter().filter(|c| c.is_dir).count();
+    let files = conflicts.len() - dirs;
+    (dirs, files, conflicts.len())
+}
+
+pub fn overwrite_conflict_row(conflict: &Conflict) -> String {
+    let kind = if conflict.is_dir { "DIR" } else { "FILE" };
+    format!("  {kind:<6}{}", conflict.dest.display())
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
