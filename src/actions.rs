@@ -600,6 +600,10 @@ pub fn import_from_path(state: &mut AppState, import_path: &Path) -> Result<()> 
     state.persisted_symlinks = imported.symlinks;
     state.persisted_modes = imported.modes;
     state.history = imported.history.into_iter().collect();
+    // 1.1 JSON without the key must not clobber session ignores.
+    if let Some(pats) = imported.ignore_patterns {
+        state.ignore_patterns = pats;
+    }
     crate::tree::rebuild_tree(state, crate::tree::AssignmentSource::Persisted)?;
     state.mark_dirty();
     state.show_toast(

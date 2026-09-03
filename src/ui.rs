@@ -80,6 +80,47 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(bar, area);
 }
 
+/// Left-truncate overflow so the title prefix and trailing cursor/count stay visible.
+fn source_panel_title(
+    filter: &str,
+    editing: bool,
+    selected_count: usize,
+    total: usize,
+    inner_width: usize,
+) -> String {
+    let count = if selected_count > 0 {
+        format!("[{selected_count} selected / {total}]")
+    } else {
+        format!("[{total}]")
+    };
+    if !editing && filter.is_empty() {
+        return format!("Source  {count}");
+    }
+
+    let cursor = if editing { "█" } else { "" };
+    let prefix = "Source (filter: ";
+    let suffix = format!("{cursor})  {count}");
+    let full_len = prefix.chars().count() + filter.chars().count() + suffix.chars().count();
+    if inner_width == 0 || full_len <= inner_width {
+        return format!("{prefix}{filter}{suffix}");
+    }
+
+    let ellipsis = "…";
+    let budget = inner_width
+        .saturating_sub(prefix.chars().count())
+        .saturating_sub(suffix.chars().count())
+        .saturating_sub(ellipsis.chars().count());
+    let tail: String = filter
+        .chars()
+        .rev()
+        .take(budget)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{prefix}{ellipsis}{tail}{suffix}")
+}
+
 fn subtree_has_destination(node: &Node) -> bool {
     match &node.kind {
         NodeKind::File { dest: Some(_) } | NodeKind::Folder { dest: Some(_), .. } => true,
@@ -167,25 +208,28 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let total = state.nodes.len();
     let selected_count = state.nodes.iter().filter(|n| n.selected).count();
-    let base_title = if state.filter.is_empty() {
-        "Source".to_string()
-    } else {
-        format!("Source (filter: {})", state.filter)
-    };
-    let title = if selected_count > 0 {
-        format!("{}  [{} selected / {}]", base_title, selected_count, total)
-    } else {
-        format!("{}  [{}]", base_title, total)
-    };
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let title = source_panel_title(
+        &state.filter,
+        state.filter_editing,
+        selected_count,
+        total,
+        inner_width,
+    );
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .title(title)
+        .block({
+            let block = Block::default()
                 .borders(Borders::ALL)
-                .border_style(state.theme.active_border)
-                .style(state.theme.body),
-        )
+                .style(state.theme.body);
+            if state.filter_editing {
+                block
+                    .title(Span::styled(title, state.theme.input_text_focus))
+                    .border_style(state.theme.input_border_focus)
+            } else {
+                block.title(title).border_style(state.theme.active_border)
+            }
+        })
         .highlight_style(state.theme.selected);
 
     f.render_stateful_widget(list, area, &mut state.list_state);
@@ -354,18 +398,6 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
                     .style(state.theme.modal_text);
                 f.render_widget(text, modal_area);
             }
-            Modal::Search => {
-                let text = Paragraph::new(format!("Filter: {}", state.filter))
-                    .style(state.theme.input_text_focus)
-                    .block(
-                        Block::default()
-                            .title("Search")
-                            .borders(Borders::ALL)
-                            .border_style(state.theme.input_border_focus)
-                            .style(state.theme.modal),
-                    );
-                f.render_widget(text, modal_area);
-            }
             Modal::EditDest { browser, .. } => {
                 let filtered = browser.filtered_indices();
                 let total = filtered.len();
@@ -430,16 +462,43 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
                     f.render_stateful_widget(scrollbar, modal_area, &mut scrollbar_state);
                 }
             }
-            Modal::IgnoreEditor { .. } => {
-                let text = Paragraph::new("Use j/k and d to edit ignores. Esc to close.")
-                    .block(
-                        Block::default()
-                            .title("Ignore Editor")
-                            .borders(Borders::ALL)
-                            .border_style(state.theme.active_border)
-                            .style(state.theme.modal),
-                    )
-                    .style(state.theme.modal_text);
+            Modal::IgnoreEditor { selected, draft } => {
+                let mut lines: Vec<Line<'_>> = Vec::new();
+                if state.ignore_patterns.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "(no patterns — all names visible)",
+                        state.theme.secondary,
+                    )));
+                } else {
+                    for (i, pat) in state.ignore_patterns.iter().enumerate() {
+                        let style = if i == *selected {
+                            state.theme.selected
+                        } else {
+                            state.theme.modal_text
+                        };
+                        let marker = if i == *selected { "> " } else { "  " };
+                        lines.push(Line::from(Span::styled(format!("{marker}{pat}"), style)));
+                    }
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!("Add: {draft}█"),
+                    state.theme.input_text_focus,
+                )));
+                lines.push(Line::from(""));
+                lines.push(Line::from(
+                    "j/k move   d/Delete remove   Enter add   Esc close",
+                ));
+                lines.push(Line::from(
+                    "Empty list disables defaults (including .dd_dotstore.json).",
+                ));
+                let text = Paragraph::new(lines).block(
+                    Block::default()
+                        .title("Ignore Editor")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.active_border)
+                        .style(state.theme.modal),
+                );
                 f.render_widget(text, modal_area);
             }
             Modal::Help => {
@@ -459,9 +518,9 @@ x            Plan remove (highlight or checkboxes; Y applies)\n\
 m            Toggle LINK/COPY for highlighted item\n\
 M            Set selected items to the next LINK/COPY mode\n\
 u            Undo last action\n\
-/            Search/filter\n\
+/            Focus source filter (does not clear)\n\
 r            Reload tree\n\
-I            Ignore editor\n\
+I            Ignore editor (list / add / delete, persisted)\n\
 i            Import picker\n\
 E            Export picker\n\
 \n\
