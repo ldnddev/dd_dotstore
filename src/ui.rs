@@ -97,12 +97,14 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
             let mut icon = match node.symlink_status {
                 SymlinkStatus::Valid => "✓ ",
                 SymlinkStatus::Broken => "✗ ",
+                SymlinkStatus::Planned => "○ ",
                 SymlinkStatus::Unknown => "? ",
                 SymlinkStatus::None => "  ",
             };
             let mut icon_style = match node.symlink_status {
                 SymlinkStatus::Valid => state.theme.valid,
                 SymlinkStatus::Broken => state.theme.broken,
+                SymlinkStatus::Planned => state.theme.info,
                 SymlinkStatus::Unknown => state.theme.highlight,
                 SymlinkStatus::None => state.theme.normal,
             };
@@ -132,12 +134,32 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
                 name.push_str(" ●");
             }
 
-            let content = Line::from(vec![
+            let name_width = name.chars().count();
+            let mut spans = vec![
                 Span::styled(prefix, state.theme.normal),
                 Span::styled(icon, icon_style),
                 Span::styled(format!("[{}] ", node.action_mode.label()), mode_style),
                 Span::styled(name, name_style),
-            ]);
+            ];
+            let dest_none = matches!(
+                &node.kind,
+                NodeKind::File { dest: None } | NodeKind::Folder { dest: None, .. }
+            );
+            if dest_none {
+                let planned = crate::actions::planned_dest(state, node);
+                let suffix = format!(" → {}", planned.display());
+                let inner = area.width.saturating_sub(2) as usize;
+                let used = prefix.chars().count() + icon.chars().count() + 7 + name_width;
+                let max_suffix = inner.saturating_sub(used);
+                if max_suffix > 0 {
+                    spans.push(Span::styled(
+                        truncate_ellipsis(&suffix, max_suffix),
+                        state.theme.secondary,
+                    ));
+                }
+            }
+
+            let content = Line::from(spans);
 
             ListItem::new(content)
         })
@@ -268,33 +290,30 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     if let Some(modal) = &state.modal {
         match modal {
-            Modal::ConfirmBulk { action } => {
-                let title = match action {
-                    BulkAction::Create => "Confirm: Apply selected?",
-                    BulkAction::Remove => "Confirm: Remove selected?",
+            Modal::Plan { action, scroll } => {
+                let title_kind = match action {
+                    BulkAction::Create => "Plan: Apply",
+                    BulkAction::Remove => "Plan: Remove",
                 };
                 let preview = crate::actions::collect_preview_lines(state, *action);
-                let mut body = preview.join("\n");
-                body.push_str("\n\nY/Enter = proceed, other = cancel (safety preview)");
-                let text = Paragraph::new(body)
-                    .block(
-                        Block::default()
-                            .title(title)
-                            .borders(Borders::ALL)
-                            .border_style(state.theme.active_border)
-                            .style(state.theme.modal),
-                    )
-                    .style(state.theme.modal_text);
-                f.render_widget(text, modal_area);
-            }
-            Modal::PreviewBulk { action } => {
-                let title = match action {
-                    BulkAction::Create => "PREVIEW: Planned CREATE (dry-run)",
-                    BulkAction::Remove => "PREVIEW: Planned REMOVE (dry-run)",
+                let (dirs, files, total) = preview_overwrite_counts(&preview);
+                let title = if total > 0 {
+                    format!("{title_kind}  ({dirs} dirs, {files} files, {total} total)")
+                } else {
+                    title_kind.to_string()
                 };
-                let preview = crate::actions::collect_preview_lines(state, *action);
-                let mut body = preview.join("\n");
-                body.push_str("\n\nThis is a DRY RUN / safety preview.\nY/Enter = actually apply now, other key = close (no changes)");
+                let inner_h = modal_area.height.saturating_sub(2) as usize;
+                let list_h = inner_h.saturating_sub(2).max(1);
+                let max_scroll = preview.len().saturating_sub(list_h);
+                let scroll = (*scroll).min(max_scroll);
+                let mut body = preview
+                    .iter()
+                    .skip(scroll)
+                    .take(list_h)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                body.push_str("\n\nY apply / other cancel   j/k scroll");
                 let text = Paragraph::new(body)
                     .block(
                         Block::default()
@@ -435,9 +454,8 @@ Space        Toggle selection (file/folder)\n\
 Enter        Edit destination (file/folder)\n\
 e            Edit destination (file/folder)\n\
 h/l or ←/→   Collapse/expand folder\n\
-s            Apply selected (confirm)\n\
-x            Remove selected (confirm)\n\
-p            Preview/dry-run plan for apply (Y to proceed)\n\
+s / p        Plan apply (highlight or checkboxes; Y applies)\n\
+x            Plan remove (highlight or checkboxes; Y applies)\n\
 m            Toggle LINK/COPY for highlighted item\n\
 M            Set selected items to the next LINK/COPY mode\n\
 u            Undo last action\n\
@@ -458,10 +476,11 @@ Wheel over right    Scroll Destinations\n\
 Drag right scrollbar Scroll the view\n\
 Click right panel   Jump focus + auto-expand ancestors\n\
 Click outside modal Close it\n\
-Click inside confirm/overwrite does nothing — use Y\n\
+Click inside a confirm/overwrite/plan dialog does nothing — use Y\n\
 Browser: click moves, double-click picks, scrollbar drag works\n\
 \n\
-Tree: proper connectors (├ └ │) + counts + subtree badges (●) for density.";
+Tree: proper connectors (├ └ │) + counts + subtree badges (●) for density.\n\
+○ planned dest (assigned, not on disk). Unassigned rows show dim → dest.";
                 let text = Paragraph::new(help)
                     .block(
                         Block::default()
@@ -598,6 +617,32 @@ fn draw_toast(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     f.render_widget(Clear, toast_area);
     f.render_widget(text, toast_area);
+}
+
+fn truncate_ellipsis(s: &str, max: usize) -> String {
+    let n = s.chars().count();
+    if n <= max {
+        return s.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    let take = max.saturating_sub(1);
+    let mut out: String = s.chars().take(take).collect();
+    out.push('…');
+    out
+}
+
+fn preview_overwrite_counts(lines: &[String]) -> (usize, usize, usize) {
+    let dirs = lines
+        .iter()
+        .filter(|l| l.contains("[OVERWRITE REAL DIR]"))
+        .count();
+    let files = lines
+        .iter()
+        .filter(|l| l.contains("[OVERWRITE REAL FILE]"))
+        .count();
+    (dirs, files, dirs + files)
 }
 
 pub fn overwrite_warning_counts(conflicts: &[Conflict]) -> (usize, usize, usize) {

@@ -3,8 +3,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use std::time::Instant;
 
 use crate::actions::{
-    assign_destination, confirm_bulk, confirm_bulk_with_overwrite, export_to_path,
-    import_from_path, open_export_picker, open_import_picker, selected_create_conflicts, undo_last,
+    action_targets, assign_destination, collect_preview_lines, confirm_bulk,
+    confirm_bulk_with_overwrite, export_to_path, import_from_path, open_export_picker,
+    open_import_picker, selected_create_conflicts, undo_last,
 };
 use crate::state::{AppState, BrowserState, BulkAction, Modal, Node, NodeKind};
 use crate::toast::ToastLevel;
@@ -49,23 +50,16 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         KeyCode::Right | KeyCode::Char('l') => set_folder_expanded(state, true),
         KeyCode::Left | KeyCode::Char('h') => set_folder_expanded(state, false),
 
-        KeyCode::Char('s') if state.has_selected() => {
-            state.modal = Some(Modal::ConfirmBulk {
+        KeyCode::Char('s') | KeyCode::Char('p') if !action_targets(state).is_empty() => {
+            state.modal = Some(Modal::Plan {
                 action: BulkAction::Create,
+                scroll: 0,
             });
         }
-        KeyCode::Char('x') if state.has_selected() => {
-            state.modal = Some(Modal::ConfirmBulk {
+        KeyCode::Char('x') if !action_targets(state).is_empty() => {
+            state.modal = Some(Modal::Plan {
                 action: BulkAction::Remove,
-            });
-        }
-
-        // Preview / dry-run safety feature: 'p' shows detailed plan of what Create would do
-        // (no changes until you confirm with Y). Use 's'/'x' for direct, or 'p' then Y.
-        // For remove preview, trigger 'x' and review the (enhanced) confirm.
-        KeyCode::Char('p') if state.has_selected() => {
-            state.modal = Some(Modal::PreviewBulk {
-                action: BulkAction::Create,
+                scroll: 0,
             });
         }
 
@@ -248,7 +242,7 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     };
 
     match current_modal {
-        Modal::ConfirmBulk { action } => match key.code {
+        Modal::Plan { action, scroll } => match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 if matches!(action, BulkAction::Create) {
                     let conflicts = selected_create_conflicts(state);
@@ -264,25 +258,18 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 confirm_bulk(state, action)?;
                 state.modal = None;
             }
-            _ => state.modal = None,
-        },
-
-        Modal::PreviewBulk { action } => match key.code {
-            // From preview (dry-run safety), y proceeds to actual apply (same flow as confirm)
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                if matches!(action, BulkAction::Create) {
-                    let conflicts = selected_create_conflicts(state);
-                    if !conflicts.is_empty() {
-                        state.modal = Some(Modal::OverwriteWarning {
-                            conflicts,
-                            action_type: action,
-                            scroll: 0,
-                        });
-                        return Ok(false);
-                    }
-                }
-                confirm_bulk(state, action)?;
-                state.modal = None;
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max_scroll = collect_preview_lines(state, action).len().saturating_sub(1);
+                state.modal = Some(Modal::Plan {
+                    action,
+                    scroll: (scroll + 1).min(max_scroll),
+                });
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.modal = Some(Modal::Plan {
+                    action,
+                    scroll: scroll.saturating_sub(1),
+                });
             }
             _ => state.modal = None,
         },
@@ -1047,9 +1034,22 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             // Wheel could scroll but Import list is usually short; omit for minimal
         }
 
-        Some(Modal::ConfirmBulk { .. })
-        | Some(Modal::OverwriteWarning { .. })
-        | Some(Modal::PreviewBulk { .. }) => {
+        Some(Modal::Plan { action, scroll }) => {
+            // Inside click must neither apply nor dismiss; wheel may scroll.
+            if matches!(
+                mouse.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            ) {
+                let max_scroll = collect_preview_lines(state, action).len().saturating_sub(1);
+                let scroll = if matches!(mouse.kind, MouseEventKind::ScrollUp) {
+                    scroll.saturating_sub(1)
+                } else {
+                    (scroll + 1).min(max_scroll)
+                };
+                state.modal = Some(Modal::Plan { action, scroll });
+            }
+        }
+        Some(Modal::OverwriteWarning { .. }) => {
             // Mis-click must neither apply nor dismiss a dialog that can remove_dir_all.
         }
 

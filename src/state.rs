@@ -64,9 +64,10 @@ pub struct Node {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SymlinkStatus {
     None,
+    Planned, // dest assigned, path NotFound
     Valid,
     Broken,
-    Unknown,
+    Unknown, // dest Some, metadata Err other than NotFound
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,11 +92,9 @@ pub enum Modal {
         node_idx: usize,
         browser: BrowserState,
     },
-    ConfirmBulk {
+    Plan {
         action: BulkAction,
-    },
-    PreviewBulk {
-        action: BulkAction,
+        scroll: usize,
     },
     OverwriteWarning {
         conflicts: Vec<Conflict>,
@@ -760,13 +759,10 @@ impl AppState {
                 "__pycache__".into(),
                 ".dd_dotstore.json".into(),
                 ".DS_Store".into(),
+                ".linked".into(),
             ],
             ..Default::default()
         }
-    }
-
-    pub fn has_selected(&self) -> bool {
-        self.nodes.iter().any(|n| n.selected)
     }
 
     pub fn update_symlink_statuses(&mut self) -> Result<()> {

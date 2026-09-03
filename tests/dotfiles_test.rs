@@ -1,13 +1,14 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use dd_dotstore::actions::{
-    assign_destination, create_copy, create_symlink, import_from_path, push_history,
-    remove_symlink, selected_create_conflicts, undo_last,
+    action_targets, assign_destination, collect_preview_lines, create_copy, create_symlink,
+    default_dest_with, import_from_path, push_history, remove_symlink, selected_create_conflicts,
+    undo_last,
 };
 use dd_dotstore::app::App;
 use dd_dotstore::inputs::{handle_key, handle_mouse};
 use dd_dotstore::state::{
-    Action, ActionMode, BrowserState, BulkAction, DirEntry, Modal, NodeKind, ThemeSource,
-    load_persistent, load_theme,
+    Action, ActionMode, BrowserState, BulkAction, DirEntry, Modal, NodeKind, SymlinkStatus,
+    ThemeSource, load_persistent, load_theme,
 };
 use dd_dotstore::toast::{TOAST_DURATION, ToastLevel};
 use dd_dotstore::tree::{build_tree, find_node, flatten_visible};
@@ -381,13 +382,16 @@ fn bulk_copy_supports_selected_folders() {
         .position(|n| n.path == Path::new("nvim"))
         .expect("find folder index");
 
+    let dest = root.join("copied_nvim");
+    assign_destination(&mut app.state, Path::new("nvim"), dest.clone()).expect("assign dest");
+
     app.state.list_state.select(Some(folder_idx));
     let _ = handle_key(&mut app.state, key(KeyCode::Char('m'))).expect("toggle mode");
     let _ = handle_key(&mut app.state, key(KeyCode::Char(' '))).expect("select folder");
     let _ = handle_key(&mut app.state, key(KeyCode::Char('s'))).expect("open bulk create");
     let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("confirm create");
 
-    let copied = root.join(".linked/nvim/lua/plugins.lua");
+    let copied = dest.join("lua/plugins.lua");
     assert_eq!(
         fs::read_to_string(copied).expect("read nested copy"),
         "return {}"
@@ -735,8 +739,9 @@ fn bulk_create_conflict_requires_overwrite_confirmation() {
         node.selected = true;
     }
 
-    app.state.modal = Some(Modal::ConfirmBulk {
+    app.state.modal = Some(Modal::Plan {
         action: dd_dotstore::state::BulkAction::Create,
+        scroll: 0,
     });
     let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("confirm create");
     assert!(matches!(
@@ -867,7 +872,9 @@ fn bulk_create_and_remove_supports_selected_folders() {
         .iter()
         .position(|n| n.path == Path::new("alacritty"))
         .expect("find folder index");
-    let folder_link = root.join(".linked/alacritty");
+    let folder_link = root.join("linked_alacritty");
+    assign_destination(&mut app.state, Path::new("alacritty"), folder_link.clone())
+        .expect("assign dest");
 
     app.state.list_state.select(Some(folder_idx));
     let _ = handle_key(&mut app.state, key(KeyCode::Char(' '))).expect("select folder");
@@ -878,7 +885,7 @@ fn bulk_create_and_remove_supports_selected_folders() {
         fs::symlink_metadata(&folder_link)
             .map(|m| m.file_type().is_symlink())
             .unwrap_or(false),
-        "expected folder symlink at fallback destination"
+        "expected folder symlink at assigned destination"
     );
 
     app.state.list_state.select(Some(folder_idx));
@@ -1334,8 +1341,9 @@ fn overwrite_lists_all_dirs_then_files() {
     assert_eq!(rows.iter().filter(|r| r.contains("DIR")).count(), 5);
     assert_eq!(rows.iter().filter(|r| r.contains("FILE")).count(), 2);
 
-    app.state.modal = Some(Modal::ConfirmBulk {
+    app.state.modal = Some(Modal::Plan {
         action: BulkAction::Create,
+        scroll: 0,
     });
     let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("open overwrite");
     match &app.state.modal {
@@ -1375,11 +1383,9 @@ fn click_inside_confirm_overwrite_preview_is_noop() {
     app.state.current_modal_area = Some(Rect::new(10, 10, 40, 20));
 
     for modal in [
-        Modal::ConfirmBulk {
+        Modal::Plan {
             action: BulkAction::Create,
-        },
-        Modal::PreviewBulk {
-            action: BulkAction::Create,
+            scroll: 0,
         },
         Modal::OverwriteWarning {
             conflicts: vec![],
@@ -1391,15 +1397,376 @@ fn click_inside_confirm_overwrite_preview_is_noop() {
         let _ = handle_mouse(&mut app.state, mouse_left(20, 15, false)).expect("inside click");
         assert!(
             app.state.modal.is_some(),
-            "click inside confirm/overwrite/preview must be a no-op"
+            "click inside confirm/overwrite/plan must be a no-op"
         );
     }
 
-    app.state.modal = Some(Modal::ConfirmBulk {
+    app.state.modal = Some(Modal::Plan {
         action: BulkAction::Create,
+        scroll: 0,
     });
     let _ = handle_mouse(&mut app.state, mouse_left(0, 0, false)).expect("outside click");
     assert!(app.state.modal.is_none(), "click outside must still cancel");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn default_dest_with_mapping_table() {
+    let home = Path::new("/tmp/fakehome");
+    let xdg = Path::new("/tmp/fakexdg");
+    let project = Path::new("/tmp/proj");
+    let map =
+        |rel: &str, is_dir: bool| default_dest_with(home, xdg, project, Path::new(rel), is_dir);
+
+    assert_eq!(
+        map(".bashrc", false),
+        PathBuf::from("/tmp/fakehome/.bashrc")
+    );
+    assert_eq!(map("nvim", true), PathBuf::from("/tmp/fakexdg/nvim"));
+    assert_eq!(map(".config/foo", false), PathBuf::from("/tmp/fakexdg/foo"));
+    assert_eq!(map(".config/foo", true), PathBuf::from("/tmp/fakexdg/foo"));
+    assert_eq!(
+        map(".config/nvim/init.lua", false),
+        PathBuf::from("/tmp/fakexdg/nvim/init.lua")
+    );
+    assert_eq!(map(".ssh", true), PathBuf::from("/tmp/fakehome/.ssh"));
+    assert_eq!(map(".config", true), PathBuf::from("/tmp/fakexdg"));
+    assert_eq!(
+        map(".config", false),
+        PathBuf::from("/tmp/fakehome/.config")
+    );
+    assert_eq!(
+        map("README.md", false),
+        PathBuf::from("/tmp/fakehome/README.md")
+    );
+    assert_eq!(
+        map("scripts/setup.sh", false),
+        PathBuf::from("/tmp/proj/.linked/scripts/setup.sh")
+    );
+}
+
+#[test]
+fn default_ignores_skip_linked_dir() {
+    let root = temp_path("dd_dotstore_test_ignore_linked");
+    fs::create_dir_all(root.join(".linked")).expect("create .linked");
+    fs::write(root.join(".linked/foo"), "x").expect("write linked file");
+    fs::write(root.join(".bashrc"), "alias ll='ls -la'").expect("write bashrc");
+
+    let app = App::new_with_root(&root).expect("app init");
+    assert!(app.state.ignore_patterns.iter().any(|p| p == ".linked"));
+    assert!(find_node(&app.state.tree, Path::new(".linked")).is_none());
+    assert!(find_node(&app.state.tree, Path::new(".bashrc")).is_some());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn assigned_missing_dest_is_planned_status() {
+    let root = temp_path("dd_dotstore_test_planned_status");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let dest = root.join("missing_home/.bashrc");
+    assign_destination(&mut app.state, Path::new(".bashrc"), dest).expect("assign dest");
+
+    let node = find_node(&app.state.tree, Path::new(".bashrc")).expect("find node");
+    assert_eq!(node.symlink_status, SymlinkStatus::Planned);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn metadata_err_other_than_notfound_is_unknown() {
+    let root = temp_path("dd_dotstore_test_unknown_status");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+    let blocker = root.join("not_a_dir");
+    fs::write(&blocker, "x").expect("write file-as-parent");
+    let dest = blocker.join("child");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    assign_destination(&mut app.state, Path::new(".bashrc"), dest).expect("assign dest");
+
+    let node = find_node(&app.state.tree, Path::new(".bashrc")).expect("find node");
+    assert_eq!(node.symlink_status, SymlinkStatus::Unknown);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn s_and_p_open_same_plan_on_highlight_without_checkbox() {
+    let root = temp_path("dd_dotstore_test_highlight_plan");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".bashrc"))
+        .expect("find bashrc");
+    app.state.list_state.select(Some(idx));
+    assert!(!app.state.nodes[idx].selected);
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('s'))).expect("s");
+    assert!(
+        matches!(
+            app.state.modal,
+            Some(Modal::Plan {
+                action: BulkAction::Create,
+                scroll: 0
+            })
+        ),
+        "s must open Plan apply"
+    );
+    assert!(
+        !app.state.nodes[idx].selected,
+        "s must not flip the checkbox"
+    );
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Esc)).expect("close plan");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('p'))).expect("p");
+    assert!(matches!(
+        app.state.modal,
+        Some(Modal::Plan {
+            action: BulkAction::Create,
+            ..
+        })
+    ));
+    assert!(!app.state.nodes[idx].selected);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn planned_dest_not_written_until_apply() {
+    let root = temp_path("dd_dotstore_test_planned_not_written");
+    fs::create_dir_all(root.join("scripts")).expect("create scripts");
+    fs::write(root.join("scripts/setup.sh"), "#!/bin/sh").expect("write script");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let folder_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new("scripts"))
+        .expect("find scripts");
+    app.state.list_state.select(Some(folder_idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('l'))).expect("expand");
+    let file_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new("scripts/setup.sh"))
+        .expect("find setup.sh");
+    app.state.list_state.select(Some(file_idx));
+
+    let node = find_node(&app.state.tree, Path::new("scripts/setup.sh")).expect("node");
+    match &node.kind {
+        NodeKind::File { dest } => assert!(dest.is_none(), "dest must stay None until apply"),
+        NodeKind::Folder { .. } => panic!("expected file"),
+    }
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('s'))).expect("open plan");
+    let node = find_node(&app.state.tree, Path::new("scripts/setup.sh")).expect("node");
+    match &node.kind {
+        NodeKind::File { dest } => assert!(dest.is_none(), "opening Plan must not write dest"),
+        NodeKind::Folder { .. } => panic!("expected file"),
+    }
+
+    let lines = collect_preview_lines(&app.state, BulkAction::Create);
+    assert!(
+        lines.iter().any(|l| l.contains("[fallback: .linked]")),
+        "nested leftover should label .linked fallback: {lines:?}"
+    );
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("apply");
+    let expected = root.join(".linked/scripts/setup.sh");
+    assert!(
+        fs::symlink_metadata(&expected)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false),
+        "apply should create fallback dest"
+    );
+    let node = find_node(&app.state.tree, Path::new("scripts/setup.sh")).expect("node");
+    match &node.kind {
+        NodeKind::File { dest } => assert_eq!(dest.as_ref(), Some(&expected)),
+        NodeKind::Folder { .. } => panic!("expected file"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn remove_unassigned_highlight_is_noop() {
+    let root = temp_path("dd_dotstore_test_remove_no_dest");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".bashrc"))
+        .expect("find bashrc");
+    app.state.list_state.select(Some(idx));
+
+    let lines = collect_preview_lines(&app.state, BulkAction::Remove);
+    assert!(
+        lines.iter().any(|l| l.contains("REMOVE (no dest)")),
+        "preview must not invent a dest: {lines:?}"
+    );
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('x'))).expect("open remove plan");
+    assert!(matches!(
+        app.state.modal,
+        Some(Modal::Plan {
+            action: BulkAction::Remove,
+            ..
+        })
+    ));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("confirm remove");
+
+    let node = find_node(&app.state.tree, Path::new(".bashrc")).expect("node");
+    match &node.kind {
+        NodeKind::File { dest } => assert!(dest.is_none()),
+        NodeKind::Folder { .. } => panic!("expected file"),
+    }
+    assert!(
+        !root.join(".linked").exists(),
+        "remove must not create a guessed .linked dest"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn action_targets_prefers_checkboxes_over_highlight() {
+    let root = temp_path("dd_dotstore_test_action_targets");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "a").expect("write bashrc");
+    fs::write(root.join(".zshrc"), "b").expect("write zshrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let bash_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".bashrc"))
+        .expect("bashrc");
+    let zsh_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".zshrc"))
+        .expect("zshrc");
+    app.state.list_state.select(Some(zsh_idx));
+    assert_eq!(
+        action_targets(&app.state),
+        vec![PathBuf::from(".zshrc")],
+        "highlight is enough when nothing is checked"
+    );
+
+    app.state.list_state.select(Some(bash_idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char(' '))).expect("check bashrc");
+    app.state.list_state.select(Some(zsh_idx));
+    let targets = action_targets(&app.state);
+    assert_eq!(targets, vec![PathBuf::from(".bashrc")]);
+    assert!(
+        !app.state
+            .nodes
+            .iter()
+            .find(|n| n.path == Path::new(".zshrc"))
+            .expect("zsh")
+            .selected
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn plan_lists_every_dir_overwrite_without_truncation() {
+    let root = temp_path("dd_dotstore_test_plan_dir_listing");
+    fs::create_dir_all(&root).expect("create root");
+    let dest_root = root.join("existing");
+    fs::create_dir_all(&dest_root).expect("dest root");
+
+    let dir_names = [
+        "dir_a", "dir_b", "dir_c", "dir_d", "dir_e", "dir_f", "dir_g", "dir_h", "dir_i",
+    ];
+    for name in dir_names {
+        fs::create_dir_all(root.join(name)).expect("src dir");
+        fs::create_dir_all(dest_root.join(name)).expect("real dest dir");
+    }
+    fs::write(root.join("file_z"), "src").expect("src file");
+    fs::write(dest_root.join("file_z"), "existing").expect("real dest file");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    for name in dir_names.iter().chain(["file_z"].iter()) {
+        assign_destination(&mut app.state, Path::new(name), dest_root.join(name))
+            .expect("assign dest");
+    }
+    for node in app.state.nodes.iter_mut() {
+        node.selected = true;
+    }
+
+    let lines = collect_preview_lines(&app.state, BulkAction::Create);
+    let dir_lines: Vec<_> = lines
+        .iter()
+        .filter(|l| l.contains("[OVERWRITE REAL DIR]"))
+        .collect();
+    assert_eq!(
+        dir_lines.len(),
+        9,
+        "every DIR overwrite must stay in the vec"
+    );
+    assert!(
+        dir_lines
+            .iter()
+            .all(|l| lines.iter().position(|x| x == *l).unwrap() < 9),
+        "DIR overwrites must sort first: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("[OVERWRITE REAL FILE]")),
+        "file overwrite should still be listed: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("+") && l.contains("more")),
+        "Plan lines must not summarize away entries: {lines:?}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn plan_jk_scrolls_without_cancel() {
+    let root = temp_path("dd_dotstore_test_plan_scroll");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".a"), "a").expect("write a");
+    fs::write(root.join(".b"), "b").expect("write b");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    for node in app.state.nodes.iter_mut() {
+        node.selected = true;
+    }
+    app.state.modal = Some(Modal::Plan {
+        action: BulkAction::Create,
+        scroll: 0,
+    });
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('j'))).expect("scroll down");
+    match &app.state.modal {
+        Some(Modal::Plan { scroll, .. }) => assert_eq!(*scroll, 1),
+        other => panic!("j must not cancel Plan, got {other:?}"),
+    }
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('k'))).expect("scroll up");
+    match &app.state.modal {
+        Some(Modal::Plan { scroll, .. }) => assert_eq!(*scroll, 0),
+        other => panic!("k must not cancel Plan, got {other:?}"),
+    }
 
     let _ = fs::remove_dir_all(root);
 }
