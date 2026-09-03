@@ -1,6 +1,4 @@
-use crate::state::{
-    ActionMode, AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus,
-};
+use crate::state::{ActionMode, AppState, BulkAction, Modal, Node, NodeKind, SymlinkStatus};
 use crate::toast::ToastLevel;
 use ratatui::{
     Frame,
@@ -12,7 +10,6 @@ use ratatui::{
     },
 };
 use std::path::PathBuf;
-
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
     state.last_frame_area = f.area();
@@ -29,7 +26,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(1),  // footer is now just the key hints line (decluttered)
+            Constraint::Length(1), // footer is now just the key hints line (decluttered)
         ])
         .split(f.area());
 
@@ -108,7 +105,10 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
                 SymlinkStatus::None => state.theme.normal,
             };
             // Enhanced visibility: folders containing configured descendants get a subtle badge icon
-            if matches!(&node.kind, NodeKind::Folder { dest: None, .. }) && subtree_has_destination(node) && node.symlink_status == SymlinkStatus::None {
+            if matches!(&node.kind, NodeKind::Folder { dest: None, .. })
+                && subtree_has_destination(node)
+                && node.symlink_status == SymlinkStatus::None
+            {
                 icon = "◌ ";
                 icon_style = state.theme.secondary;
             }
@@ -124,7 +124,9 @@ fn draw_source_panel(f: &mut Frame, state: &mut AppState, area: Rect) {
                 _ => (node.name.clone(), state.theme.file),
             };
             // Badge for folders that have (grand)children with destinations configured (information density)
-            if matches!(&node.kind, NodeKind::Folder { dest: None, .. }) && subtree_has_destination(node) {
+            if matches!(&node.kind, NodeKind::Folder { dest: None, .. })
+                && subtree_has_destination(node)
+            {
                 name.push_str(" ●");
             }
 

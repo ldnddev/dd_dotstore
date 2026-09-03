@@ -28,10 +28,38 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+struct TerminalGuard {
+    raw: bool,
+    alt: bool,
+    mouse: bool,
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let mut out = stdout();
+        if self.mouse {
+            let _ = out.execute(DisableMouseCapture);
+        }
+        if self.alt {
+            let _ = out.execute(LeaveAlternateScreen);
+        }
+        if self.raw {
+            let _ = disable_raw_mode();
+        }
+    }
+}
+
 fn run_app(project_root: Option<PathBuf>) -> Result<()> {
+    let mut guard = TerminalGuard {
+        raw: false,
+        alt: false,
+        mouse: false,
+    };
     enable_raw_mode()?;
+    guard.raw = true;
     stdout().execute(EnterAlternateScreen)?;
-    let _ = stdout().execute(EnableMouseCapture);
+    guard.alt = true;
+    guard.mouse = stdout().execute(EnableMouseCapture).is_ok();
 
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
@@ -66,10 +94,14 @@ fn run_app(project_root: Option<PathBuf>) -> Result<()> {
         }
     }
 
-    let _ = app.save();
-    let _ = stdout().execute(DisableMouseCapture);
-    let _ = stdout().execute(LeaveAlternateScreen);
-    let _ = disable_raw_mode();
+    let config_path = app.state.config_path.clone();
+    let save_res = app.state.persist_now_if_dirty();
+    drop(terminal);
+    drop(guard);
+    if let Err(err) = save_res {
+        eprintln!("Failed to save {}: {err}", config_path.display());
+        std::process::exit(1);
+    }
     Ok(())
 }
 

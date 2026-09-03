@@ -2,12 +2,12 @@ use anyhow::{Context, Result};
 use crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::Frame;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{
     inputs::{handle_key, handle_mouse},
-    state::{Action, AppState, Theme, ThemeStatus, load, load_theme, save},
-    tree::{build_tree, flatten_visible, set_action_mode, set_dest},
+    state::{Action, AppState, PERSIST_IDLE, Theme, ThemeStatus, load, load_theme},
+    tree::{AssignmentSource, rebuild_tree},
     ui::draw,
 };
 
@@ -44,17 +44,7 @@ impl App {
             }
         }
         state.header_copy = random_header_copy(&state.theme.header_quotes);
-        state.tree = build_tree(project_root, &state.ignore_patterns);
-
-        for (rel, dest) in state.persisted_symlinks.clone() {
-            set_dest(&mut state.tree, Path::new(&rel), Some(dest.into()));
-        }
-        for (rel, action_mode) in state.persisted_modes.clone() {
-            set_action_mode(&mut state.tree, Path::new(&rel), action_mode);
-        }
-
-        flatten_visible(&mut state);
-        state.update_symlink_statuses()?;
+        rebuild_tree(&mut state, AssignmentSource::Persisted)?;
 
         if !state.nodes.is_empty() {
             state.list_state.select(Some(0));
@@ -63,8 +53,8 @@ impl App {
         Ok(Self { state })
     }
 
-    pub fn save(&self) -> Result<()> {
-        save(&self.state, &self.state.config_path)
+    pub fn save(&mut self) -> Result<()> {
+        self.state.persist_now()
     }
 
     pub fn draw(&mut self, f: &mut Frame) {
@@ -81,13 +71,27 @@ impl App {
 
     pub fn tick(&mut self) {
         self.state.clear_expired_toast();
+
+        let Some(since) = self.state.dirty_since else {
+            return;
+        };
+        if since.elapsed() < PERSIST_IDLE {
+            return;
+        }
+        if self
+            .state
+            .persist_retry_at
+            .is_some_and(|at| Instant::now() < at)
+        {
+            return;
+        }
+        if let Err(err) = self.state.persist_now() {
+            self.state.record_persist_error(&err);
+        }
     }
 
     pub fn reload(&mut self) -> Result<()> {
-        self.state.tree = build_tree(&self.state.project_root, &self.state.ignore_patterns);
-        flatten_visible(&mut self.state);
-        self.state.update_symlink_statuses()?;
-        Ok(())
+        rebuild_tree(&mut self.state, AssignmentSource::LiveTree)
     }
 
     pub fn push_action(&mut self, action: Action) {
