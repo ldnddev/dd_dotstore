@@ -87,6 +87,7 @@ fn create_symlink_with_overwrite(
 
         flatten_visible(state);
         state.update_symlink_statuses()?;
+        state.mark_dirty();
         Ok(true)
     }
 }
@@ -129,6 +130,7 @@ fn create_copy_with_overwrite(
 
     flatten_visible(state);
     state.update_symlink_statuses()?;
+    state.mark_dirty();
     Ok(true)
 }
 
@@ -201,6 +203,7 @@ fn remove_deployed_item(state: &mut AppState, rel_src: &Path) -> Result<bool> {
             },
         };
         push_history(state, action);
+        state.mark_dirty();
     }
 
     flatten_visible(state);
@@ -280,17 +283,14 @@ pub fn confirm_bulk_with_overwrite(
     }
 
     flatten_visible(state);
+    state.persist_now_or_toast();
     Ok(())
 }
 
 /// Collect human-readable preview lines for what a bulk action would do.
 /// Used for safety/preview/dry-run modals.
 pub fn collect_preview_lines(state: &AppState, action: BulkAction) -> Vec<String> {
-    let selected: Vec<_> = state
-        .nodes
-        .iter()
-        .filter(|n| n.selected)
-        .collect();
+    let selected: Vec<_> = state.nodes.iter().filter(|n| n.selected).collect();
 
     if selected.is_empty() {
         return vec!["(no items selected)".to_string()];
@@ -303,10 +303,18 @@ pub fn collect_preview_lines(state: &AppState, action: BulkAction) -> Vec<String
             BulkAction::Create => {
                 let fallback = state.project_root.join(".linked").join(&node.path);
                 let (dest, mode) = match &node.kind {
-                    NodeKind::File { dest } => (dest.clone().unwrap_or(fallback.clone()), node.action_mode),
-                    NodeKind::Folder { dest, .. } => (dest.clone().unwrap_or(fallback.clone()), node.action_mode),
+                    NodeKind::File { dest } => {
+                        (dest.clone().unwrap_or(fallback.clone()), node.action_mode)
+                    }
+                    NodeKind::Folder { dest, .. } => {
+                        (dest.clone().unwrap_or(fallback.clone()), node.action_mode)
+                    }
                 };
-                let arrow = if mode == ActionMode::Symlink { "->" } else { "=>" };
+                let arrow = if mode == ActionMode::Symlink {
+                    "->"
+                } else {
+                    "=>"
+                };
                 let mut line = format!(
                     "{} {} {} {}",
                     mode.label(),
@@ -327,7 +335,11 @@ pub fn collect_preview_lines(state: &AppState, action: BulkAction) -> Vec<String
                     NodeKind::File { dest } => dest.clone(),
                     NodeKind::Folder { dest, .. } => dest.clone(),
                 } {
-                    let arrow = if node.action_mode == ActionMode::Symlink { "->" } else { "=>" };
+                    let arrow = if node.action_mode == ActionMode::Symlink {
+                        "->"
+                    } else {
+                        "=>"
+                    };
                     lines.push(format!(
                         "REMOVE {} {} {} {}",
                         node.action_mode.label(),
@@ -414,6 +426,8 @@ pub fn undo_last(state: &mut AppState) -> Result<()> {
 
     flatten_visible(state);
     state.update_symlink_statuses()?;
+    state.mark_dirty();
+    state.persist_now_or_toast();
     Ok(())
 }
 
@@ -441,6 +455,7 @@ pub fn assign_destination(state: &mut AppState, rel_src: &Path, dest: PathBuf) -
     set_dest(&mut state.tree, rel_src, Some(dest));
     flatten_visible(state);
     state.update_symlink_statuses()?;
+    state.mark_dirty();
     Ok(())
 }
 
@@ -496,21 +511,17 @@ fn sorted_import_candidates(read_dir: fs::ReadDir) -> Vec<PathBuf> {
 }
 
 pub fn import_from_path(state: &mut AppState, import_path: &Path) -> Result<()> {
-    let imported = crate::state::load(import_path)?;
-    state.persisted_symlinks = imported.persisted_symlinks;
-    state.history = imported.history;
-
-    state.tree = crate::tree::build_tree(&state.project_root, &state.ignore_patterns);
-    for (rel, dest) in state.persisted_symlinks.clone() {
-        set_dest(&mut state.tree, Path::new(&rel), Some(dest.into()));
-    }
-    flatten_visible(state);
-    state.update_symlink_statuses()?;
-
+    let imported = crate::state::load_persistent(import_path)?;
+    state.persisted_symlinks = imported.symlinks;
+    state.persisted_modes = imported.modes;
+    state.history = imported.history.into_iter().collect();
+    crate::tree::rebuild_tree(state, crate::tree::AssignmentSource::Persisted)?;
+    state.mark_dirty();
     state.show_toast(
         ToastLevel::Success,
         format!("Imported {}", import_path.display()),
     );
+    state.persist_now_or_toast();
     Ok(())
 }
 
@@ -531,12 +542,12 @@ pub fn open_export_picker(state: &mut AppState) -> Result<()> {
 
 pub fn export_to_path(state: &mut AppState, export_path: &Path) -> Result<()> {
     crate::state::save(state, export_path)?;
-    crate::state::save(state, &state.config_path)?;
-
+    state.mark_dirty();
     state.show_toast(
         ToastLevel::Success,
         format!("Exported current state to {}", export_path.display()),
     );
+    state.persist_now_or_toast();
     Ok(())
 }
 

@@ -1,18 +1,20 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_dotstore::actions::{
-    assign_destination, create_copy, create_symlink, push_history, remove_symlink, undo_last,
+    assign_destination, create_copy, create_symlink, import_from_path, push_history,
+    remove_symlink, undo_last,
 };
 use dd_dotstore::app::App;
 use dd_dotstore::inputs::handle_key;
 use dd_dotstore::state::{
-    Action, ActionMode, BrowserState, DirEntry, Modal, NodeKind, ThemeSource, load_theme,
+    Action, ActionMode, BrowserState, DirEntry, Modal, NodeKind, ThemeSource, load_persistent,
+    load_theme,
 };
 use dd_dotstore::toast::{TOAST_DURATION, ToastLevel};
 use dd_dotstore::tree::{build_tree, find_node, flatten_visible};
 use ratatui::style::Color;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn temp_path(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -123,7 +125,10 @@ colors:
     assert_eq!(theme.colors.base_background, Color::Rgb(1, 2, 3));
     assert_eq!(theme.colors.border_active, Color::Rgb(0xb1, 0xb2, 0xb3));
     assert_eq!(theme.colors.links, Color::Rgb(0x9a, 0x9b, 0x9c));
-    assert_eq!(theme.header_quotes, vec!["Custom quote 1".to_string(), "Custom quote 2".to_string()]);
+    assert_eq!(
+        theme.header_quotes,
+        vec!["Custom quote 1".to_string(), "Custom quote 2".to_string()]
+    );
 
     let _ = fs::remove_dir_all(root);
 }
@@ -174,7 +179,13 @@ colors:
             .contains("Unsupported theme schema version")
     );
     assert_eq!(app.state.theme.header_quotes.len(), 5);
-    assert!(app.state.theme.header_quotes.iter().any(|q| q.contains("Ricer")));
+    assert!(
+        app.state
+            .theme
+            .header_quotes
+            .iter()
+            .any(|q| q.contains("Ricer"))
+    );
 
     let _ = fs::remove_dir_all(root);
 }
@@ -876,6 +887,285 @@ fn bulk_create_and_remove_supports_selected_folders() {
     assert!(
         fs::symlink_metadata(&folder_link).is_err(),
         "expected folder symlink to be removed"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+fn broken_config_path(root: &Path) -> PathBuf {
+    let blocker = root.join("not_a_dir");
+    fs::write(&blocker, "x").expect("write file-as-parent");
+    blocker.join(".dd_dotstore.json")
+}
+
+#[test]
+fn reload_keeps_dests_and_modes_and_resets_expand() {
+    let root = temp_path("dd_dotstore_test_reload_keeps");
+    fs::create_dir_all(root.join("nvim")).expect("create nvim dir");
+    fs::write(root.join("nvim/init.lua"), "return {}").expect("write nested");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let dest = root.join("home/.bashrc");
+    assign_destination(&mut app.state, Path::new(".bashrc"), dest.clone()).expect("assign dest");
+
+    let idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".bashrc"))
+        .expect("find .bashrc");
+    app.state.list_state.select(Some(idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('m'))).expect("toggle mode");
+
+    let folder_idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new("nvim"))
+        .expect("find nvim");
+    app.state.list_state.select(Some(folder_idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('l'))).expect("expand");
+
+    app.reload().expect("reload");
+
+    let node = find_node(&app.state.tree, Path::new(".bashrc")).expect("bashrc after reload");
+    match &node.kind {
+        NodeKind::File { dest: node_dest } => assert_eq!(node_dest.as_ref(), Some(&dest)),
+        NodeKind::Folder { .. } => panic!("expected file"),
+    }
+    assert_eq!(node.action_mode, ActionMode::Copy);
+
+    let folder = find_node(&app.state.tree, Path::new("nvim")).expect("nvim after reload");
+    match &folder.kind {
+        NodeKind::Folder { expanded, .. } => assert!(!*expanded, "expand state resets on rebuild"),
+        NodeKind::File { .. } => panic!("expected folder"),
+    }
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('l'))).expect("expand again");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('r'))).expect("r reload");
+    let node = find_node(&app.state.tree, Path::new(".bashrc")).expect("bashrc after r");
+    assert_eq!(node.action_mode, ActionMode::Copy);
+    match &node.kind {
+        NodeKind::File { dest: node_dest } => assert_eq!(node_dest.as_ref(), Some(&dest)),
+        NodeKind::Folder { .. } => panic!("expected file"),
+    }
+    let folder = find_node(&app.state.tree, Path::new("nvim")).expect("nvim after r");
+    match &folder.kind {
+        NodeKind::Folder { expanded, .. } => assert!(!*expanded),
+        NodeKind::File { .. } => panic!("expected folder"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn import_restores_modes() {
+    let root = temp_path("dd_dotstore_test_import_modes");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".toolrc"), "mode=copy").expect("write source");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let import_path = root.join("import.json");
+    fs::write(
+        &import_path,
+        r#"{"symlinks":{".toolrc":"/tmp/dest_toolrc"},"modes":{".toolrc":"copy"},"history":[]}"#,
+    )
+    .expect("write import");
+
+    import_from_path(&mut app.state, &import_path).expect("import");
+
+    let node = find_node(&app.state.tree, Path::new(".toolrc")).expect("node");
+    assert_eq!(node.action_mode, ActionMode::Copy);
+    match &node.kind {
+        NodeKind::File { dest } => {
+            assert_eq!(dest.as_ref(), Some(&PathBuf::from("/tmp/dest_toolrc")))
+        }
+        NodeKind::Folder { .. } => panic!("expected file"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn save_omits_empty_dests_and_default_modes() {
+    let root = temp_path("dd_dotstore_test_snapshot_rules");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+    fs::write(root.join(".toolrc"), "mode=copy").expect("write toolrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let dest = root.join("home/.bashrc");
+    assign_destination(&mut app.state, Path::new(".bashrc"), dest.clone()).expect("assign dest");
+
+    let idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == Path::new(".toolrc"))
+        .expect("find toolrc");
+    app.state.list_state.select(Some(idx));
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('m'))).expect("toggle mode");
+
+    app.save().expect("persist");
+    let data = load_persistent(&app.state.config_path).expect("load snapshot");
+    assert_eq!(
+        data.symlinks.get(".bashrc").map(String::as_str),
+        Some(dest.to_string_lossy().as_ref())
+    );
+    assert!(!data.symlinks.contains_key(".toolrc"));
+    assert_eq!(data.modes.get(".toolrc"), Some(&ActionMode::Copy));
+    assert!(!data.modes.contains_key(".bashrc"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn persist_tick_writes_after_idle_without_sleep() {
+    let root = temp_path("dd_dotstore_test_persist_debounce");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let config = app.state.config_path.clone();
+    assert!(!config.exists());
+
+    app.state.mark_dirty();
+    app.tick();
+    assert!(!config.exists(), "idle window should not have elapsed");
+
+    app.state.dirty_since = Some(Instant::now() - Duration::from_secs(1));
+    app.tick();
+    assert!(
+        config.exists(),
+        "backdated dirty_since should flush on tick"
+    );
+    assert!(app.state.dirty_since.is_none());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn persist_failure_toasts_once_and_retries_after_backoff() {
+    let root = temp_path("dd_dotstore_test_persist_fail");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".bashrc"), "export EDITOR=nvim").expect("write bashrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    app.state.config_path = broken_config_path(&root);
+
+    app.state.mark_dirty();
+    app.state.dirty_since = Some(Instant::now() - Duration::from_secs(1));
+    app.tick();
+
+    let toast = app.state.toast.as_ref().expect("error toast");
+    assert_eq!(toast.level, ToastLevel::Error);
+    assert!(
+        toast.message.starts_with("Save failed:"),
+        "unexpected toast: {}",
+        toast.message
+    );
+    let first_created = toast.created_at;
+    let first_msg = toast.message.clone();
+    assert!(app.state.persist_retry_at.is_some());
+    assert_eq!(
+        app.state.last_save_error.as_deref(),
+        Some(first_msg.as_str())
+    );
+
+    app.tick();
+    let toast = app.state.toast.as_ref().expect("toast after second tick");
+    assert_eq!(toast.created_at, first_created);
+    assert_eq!(toast.message, first_msg);
+
+    app.state.persist_retry_at = Some(Instant::now() - Duration::from_millis(1));
+    app.tick();
+    let toast = app.state.toast.as_ref().expect("toast after retry");
+    assert_eq!(toast.created_at, first_created);
+    assert_eq!(toast.message, first_msg);
+    assert!(
+        app.state
+            .persist_retry_at
+            .is_some_and(|at| at > Instant::now()),
+        "retry should reschedule backoff"
+    );
+
+    app.state.mark_dirty();
+    assert!(app.state.persist_retry_at.is_none());
+    assert_eq!(
+        app.state.last_save_error.as_deref(),
+        Some(first_msg.as_str())
+    );
+    app.state.dirty_since = Some(Instant::now() - Duration::from_secs(1));
+    app.tick();
+    assert!(
+        app.state
+            .persist_retry_at
+            .is_some_and(|at| at > Instant::now())
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn handle_key_persist_failure_returns_ok() {
+    let root = temp_path("dd_dotstore_test_key_persist_fail");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".vimrc"), "set number").expect("write vimrc");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let rel = Path::new(".vimrc");
+    let dest = root.join("home/.vimrc");
+    create_symlink(&mut app.state, rel, &dest).expect("create symlink");
+    app.state.config_path = broken_config_path(&root);
+
+    let handled = handle_key(&mut app.state, key(KeyCode::Char('u'))).expect("undo key");
+    assert!(!handled, "persist failure must not quit");
+    let toast = app.state.toast.as_ref().expect("save-failed toast");
+    assert_eq!(toast.level, ToastLevel::Error);
+    assert!(
+        toast.message.starts_with("Save failed:"),
+        "unexpected toast: {}",
+        toast.message
+    );
+    assert!(!toast.message.contains("Import failed"));
+
+    let idx = app
+        .state
+        .nodes
+        .iter()
+        .position(|n| n.path == rel)
+        .expect("find vimrc");
+    app.state.list_state.select(Some(idx));
+    assign_destination(&mut app.state, rel, dest.clone()).expect("reassign dest");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char(' '))).expect("select");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('s'))).expect("open confirm");
+    let handled = handle_key(&mut app.state, key(KeyCode::Char('y'))).expect("apply");
+    assert!(!handled, "apply persist failure must not quit");
+    let toast = app.state.toast.as_ref().expect("apply save-failed toast");
+    assert!(toast.message.starts_with("Save failed:"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn dest_lock_does_not_mark_dirty() {
+    let root = temp_path("dd_dotstore_test_dest_lock_dirty");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join(".zprofile"), "export ZDOTDIR=$HOME").expect("write zprofile");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let rel = Path::new(".zprofile");
+    let old_dest = root.join("home/.zprofile");
+    let new_dest = root.join("home/.zprofile_new");
+    create_symlink(&mut app.state, rel, &old_dest).expect("create initial symlink");
+    app.state.persist_now().expect("clear dirty");
+    assert!(app.state.dirty_since.is_none());
+
+    assign_destination(&mut app.state, rel, new_dest.clone()).expect("dest lock");
+    assert!(
+        app.state.dirty_since.is_none(),
+        "dest-lock must not mark dirty"
     );
 
     let _ = fs::remove_dir_all(root);

@@ -4,12 +4,13 @@ use std::time::Instant;
 
 use crate::actions::{
     assign_destination, confirm_bulk, confirm_bulk_with_overwrite, export_to_path,
-    import_from_path, open_export_picker, open_import_picker, selected_create_conflicts,
-    undo_last,
+    import_from_path, open_export_picker, open_import_picker, selected_create_conflicts, undo_last,
 };
 use crate::state::{AppState, BrowserState, BulkAction, Modal, NodeKind};
 use crate::toast::ToastLevel;
-use crate::tree::{find_mut_node, flatten_visible, toggle_expand, toggle_selected};
+use crate::tree::{
+    AssignmentSource, find_mut_node, flatten_visible, rebuild_tree, toggle_expand, toggle_selected,
+};
 use ratatui::layout::Rect;
 use std::path::PathBuf;
 
@@ -72,8 +73,7 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         }
 
         KeyCode::Char('r') => {
-            state.tree = crate::tree::build_tree(&state.project_root, &state.ignore_patterns);
-            flatten_visible(state);
+            rebuild_tree(state, AssignmentSource::LiveTree)?;
         }
 
         KeyCode::Char('I') => {
@@ -125,6 +125,7 @@ fn toggle_mode_for_highlighted(state: &mut AppState) {
 
     if let Some(node) = find_mut_node(&mut state.tree, &selected.path) {
         node.action_mode = node.action_mode.toggled();
+        state.mark_dirty();
     }
 
     flatten_visible(state);
@@ -152,10 +153,17 @@ fn toggle_mode_for_selected(state: &mut AppState) {
         .map(|node| node.action_mode.toggled());
 
     if let Some(target_mode) = target_mode {
+        let mut changed = false;
         for path in selected_paths {
-            if let Some(node) = find_mut_node(&mut state.tree, &path) {
+            if let Some(node) = find_mut_node(&mut state.tree, &path)
+                && node.action_mode != target_mode
+            {
                 node.action_mode = target_mode;
+                changed = true;
             }
+        }
+        if changed {
+            state.mark_dirty();
         }
     }
 
@@ -436,7 +444,9 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                         format!("{filename}.json")
                     };
                     let path = dir.join(name);
-                    export_to_path(state, &path)?;
+                    if let Err(err) = export_to_path(state, &path) {
+                        state.show_toast(ToastLevel::Error, format!("Export failed: {err}"));
+                    }
                     state.modal = None;
                     return Ok(false);
                 }
@@ -508,7 +518,11 @@ fn is_over_scrollbar(area: &Rect, col: u16, row: u16) -> bool {
 fn handle_main_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
     match mouse.kind {
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-            let delta: usize = if mouse.modifiers.contains(KeyModifiers::SHIFT) { 8 } else { 3 };
+            let delta: usize = if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                8
+            } else {
+                3
+            };
             if rect_contains(state.source_area, mouse.column, mouse.row) {
                 // Wheel on source
                 if state.nodes.is_empty() {
@@ -592,7 +606,9 @@ fn handle_main_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                 // Double-click detection (only counts on name part later)
                 let now = Instant::now();
                 let is_double = if let Some((lx, ly, lt)) = state.last_mouse_click_pos {
-                    lx == mouse.column && ly == mouse.row && now.duration_since(lt).as_millis() < 420
+                    lx == mouse.column
+                        && ly == mouse.row
+                        && now.duration_since(lt).as_millis() < 420
                 } else {
                     false
                 };
@@ -618,7 +634,9 @@ fn handle_main_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                             }
                             flatten_visible(state);
                             // Re-clamp the highlight (flatten rarely changes indices for pure select-range on visible items)
-                            state.list_state.select(Some(idx.min(state.nodes.len().saturating_sub(1))));
+                            state
+                                .list_state
+                                .select(Some(idx.min(state.nodes.len().saturating_sub(1))));
                         }
                         // Skip other zone actions for shift range
                     } else {
@@ -651,10 +669,8 @@ fn handle_main_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                             crate::tree::expand_ancestors(state, &target_path);
                             flatten_visible(state);
                             // Re-find after possible expansion (indices may shift)
-                            if let Some(idx) = state
-                                .nodes
-                                .iter()
-                                .position(|n| n.path == target_path)
+                            if let Some(idx) =
+                                state.nodes.iter().position(|n| n.path == target_path)
                             {
                                 state.list_state.select(Some(idx));
                             }
@@ -796,7 +812,9 @@ fn open_dest_browser_for(state: &mut AppState, idx: usize) {
     }
     state.list_state.select(Some(idx));
     // Reuse the existing logic that reads the (now updated) selected
-    if let Some(i) = state.list_state.selected() && i < state.nodes.len() {
+    if let Some(i) = state.list_state.selected()
+        && i < state.nodes.len()
+    {
         let mut browser = BrowserState::new();
         browser.refresh_entries();
         state.modal = Some(Modal::EditDest {
@@ -824,15 +842,20 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
     // We clone like the key handler does for mutation of inner state
     let current_modal = state.modal.clone();
     match current_modal {
-        Some(Modal::EditDest { node_idx, mut browser }) => {
+        Some(Modal::EditDest {
+            node_idx,
+            mut browser,
+        }) => {
             let filtered = browser.filtered_indices();
             let total_f = filtered.len();
 
             // Scrollbar drag/click for the browser list (right edge of modal)
             let sb_col = modal_area.x + modal_area.width.saturating_sub(1);
             let over_sb = mouse.column == sb_col;
-            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left))
-                && over_sb
+            if matches!(
+                mouse.kind,
+                MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left)
+            ) && over_sb
             {
                 if total_f > 0 {
                     let track_top = modal_area.y + 1;
@@ -851,8 +874,15 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             }
 
             // Wheel inside browser modal scrolls the picker
-            if matches!(mouse.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
-                let delta = if mouse.modifiers.contains(KeyModifiers::SHIFT) { 10 } else { 3 };
+            if matches!(
+                mouse.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            ) {
+                let delta = if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                    10
+                } else {
+                    3
+                };
                 if matches!(mouse.kind, MouseEventKind::ScrollUp) {
                     browser.selected = browser.selected.saturating_sub(delta);
                 } else {
@@ -884,7 +914,9 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                             // Double click detection + only on name (most of row; sb already filtered)
                             let now = Instant::now();
                             let is_double = if let Some((lx, ly, lt)) = state.last_mouse_click_pos {
-                                lx == mouse.column && ly == mouse.row && now.duration_since(lt).as_millis() < 420
+                                lx == mouse.column
+                                    && ly == mouse.row
+                                    && now.duration_since(lt).as_millis() < 420
                             } else {
                                 false
                             };
@@ -913,10 +945,15 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                                         browser.clamp_selected();
                                         state.modal = Some(Modal::EditDest { node_idx, browser });
                                         return Ok(false);
-                                    } else if let Some(rel_src) = selected_rel_path(state, node_idx) {
+                                    } else if let Some(rel_src) = selected_rel_path(state, node_idx)
+                                    {
                                         let dest = browser.current.join(&entry.name);
-                                        if let Err(err) = assign_destination(state, &rel_src, dest) {
-                                            state.show_toast(ToastLevel::Error, format!("Failed to set destination: {err}"));
+                                        if let Err(err) = assign_destination(state, &rel_src, dest)
+                                        {
+                                            state.show_toast(
+                                                ToastLevel::Error,
+                                                format!("Failed to set destination: {err}"),
+                                            );
                                         }
                                         state.modal = None;
                                         return Ok(false);
@@ -934,21 +971,29 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             }
         }
 
-        Some(Modal::ImportPicker { files, selected: _selected }) => {
+        Some(Modal::ImportPicker {
+            files,
+            selected: _selected,
+        }) => {
             // Click to choose the row (Enter still required to confirm, per spec)
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
                 let content_top = modal_area.y + 1;
                 if mouse.row >= content_top {
                     let rel = (mouse.row - content_top) as usize;
                     if rel < files.len() {
-                        state.modal = Some(Modal::ImportPicker { files, selected: rel });
+                        state.modal = Some(Modal::ImportPicker {
+                            files,
+                            selected: rel,
+                        });
                     }
                 }
             }
             // Wheel could scroll but Import list is usually short; omit for minimal
         }
 
-        Some(Modal::ConfirmBulk { .. }) | Some(Modal::OverwriteWarning { .. }) | Some(Modal::PreviewBulk { .. }) => {
+        Some(Modal::ConfirmBulk { .. })
+        | Some(Modal::OverwriteWarning { .. })
+        | Some(Modal::PreviewBulk { .. }) => {
             // Click inside = confirm (y) for safety dialogs, outside already cancelled above.
             // For Preview (dry-run), click cancels (use keyboard Y to proceed to actual apply).
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {

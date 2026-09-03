@@ -1,4 +1,6 @@
 use crate::state::{ActionMode, AppState, Node, NodeKind, SymlinkStatus};
+use anyhow::Result;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -200,6 +202,102 @@ pub fn set_action_mode(nodes: &mut [Node], rel: &Path, action_mode: ActionMode) 
     if let Some(node) = find_mut_node(nodes, rel) {
         node.action_mode = action_mode;
     }
+}
+
+/// Walk the live tree using the same rules as save: dests only when `Some`,
+/// modes only when not the default LINK.
+pub fn collect_assignments(
+    tree: &[Node],
+) -> (HashMap<String, String>, HashMap<String, ActionMode>) {
+    let mut dests = HashMap::new();
+    let mut modes = HashMap::new();
+    fn walk(
+        node: &Node,
+        dests: &mut HashMap<String, String>,
+        modes: &mut HashMap<String, ActionMode>,
+    ) {
+        if node.action_mode != ActionMode::Symlink {
+            modes.insert(node.path.to_string_lossy().into_owned(), node.action_mode);
+        }
+        match &node.kind {
+            NodeKind::File { dest: Some(d) } | NodeKind::Folder { dest: Some(d), .. } => {
+                dests.insert(
+                    node.path.to_string_lossy().into_owned(),
+                    d.to_string_lossy().into_owned(),
+                );
+            }
+            _ => {}
+        }
+        if let NodeKind::Folder { children, .. } = &node.kind {
+            for child in children {
+                walk(child, dests, modes);
+            }
+        }
+    }
+    for node in tree {
+        walk(node, &mut dests, &mut modes);
+    }
+    (dests, modes)
+}
+
+pub fn snapshot_assignments(
+    tree: &[Node],
+) -> (HashMap<String, String>, HashMap<String, ActionMode>) {
+    collect_assignments(tree)
+}
+
+pub fn apply_persisted(
+    tree: &mut [Node],
+    dests: &HashMap<String, String>,
+    modes: &HashMap<String, ActionMode>,
+) {
+    for (rel, dest) in dests {
+        set_dest(tree, Path::new(rel), Some(PathBuf::from(dest)));
+    }
+    for (rel, action_mode) in modes {
+        set_action_mode(tree, Path::new(rel), *action_mode);
+    }
+}
+
+pub enum AssignmentSource {
+    /// Snapshot dests + modes from the live tree (reload, ignore-edit).
+    LiveTree,
+    /// Use state.persisted_symlinks / persisted_modes (init, import).
+    Persisted,
+}
+
+pub fn rebuild_tree(state: &mut AppState, source: AssignmentSource) -> Result<()> {
+    let selected_path = state
+        .list_state
+        .selected()
+        .and_then(|i| state.nodes.get(i))
+        .map(|n| n.path.clone());
+
+    let (dests, modes) = match source {
+        AssignmentSource::LiveTree => snapshot_assignments(&state.tree),
+        AssignmentSource::Persisted => (
+            state.persisted_symlinks.clone(),
+            state.persisted_modes.clone(),
+        ),
+    };
+
+    state.tree = build_tree(&state.project_root, &state.ignore_patterns);
+    // Folders start collapsed; expand state is not restored across rebuild.
+    apply_persisted(&mut state.tree, &dests, &modes);
+
+    // Flatten happens inside update_symlink_statuses; reselect after that.
+    state.update_symlink_statuses()?;
+
+    if let Some(path) = selected_path {
+        if let Some(idx) = state.nodes.iter().position(|n| n.path == path) {
+            state.list_state.select(Some(idx));
+        } else if state.nodes.is_empty() {
+            state.list_state.select(None);
+        } else {
+            state.list_state.select(Some(0));
+        }
+    }
+    Ok(())
 }
 
 pub fn update_symlink_statuses_recursive(nodes: &mut [Node], root: &Path) {
