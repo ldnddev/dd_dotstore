@@ -132,19 +132,30 @@ All future ldnddev TUI tools (such as dd_ftp) are expected to follow the same st
 
 The installer detects your OS/architecture and installs the matching Linux package (`x86_64` or `aarch64` musl) from GitHub Releases, plus the theme file.
 
+This repository is private, so anonymous GitHub URLs return 404. Use a GitHub token (from `gh auth login`):
+
 ```bash
-# Recommended: download the prebuilt package for this machine
-curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
+# Recommended while the repo is private
+export GITHUB_TOKEN="$(gh auth token)"
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
 
 # Specific release
-curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.3.0
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.3.0
 
 # Install somewhere else
-PREFIX=/usr/local curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
-BINDIR=/opt/bin curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
+PREFIX=/usr/local curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
 
 # Verify
 dd_dotstore --help
+```
+
+If the repository is public, the unauthenticated form works:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
 ```
 
 Pipe the script to `bash` (not `sh`). Default install location is `~/.local/bin`; the theme goes to `~/.config/ldnddev/dd_dotstore_theme.yml`. If a prebuilt package is not available, the script clones the repo and builds with Cargo (Rust 1.85+).
@@ -167,7 +178,9 @@ The installer warns if the target bin directory is not on `PATH`.
 ## Uninstall
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --uninstall
+export GITHUB_TOKEN="$(gh auth token)"
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --uninstall
 
 # From a source checkout
 ./install.sh -uninstall

@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Install dd_dotstore for this machine.
 #
-# Curl (recommended):
+# Curl (public repo):
 #   curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
+#
+# Private repo (needs GitHub access):
+#   export GITHUB_TOKEN="$(gh auth token)"
+#   curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+#     https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
 #
 # From a source checkout:
 #   ./install.sh
@@ -22,7 +27,8 @@ Install ${APP_NAME}
 
 Usage:
   curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- [options]
+  curl -fsSL -H "Authorization: Bearer \$GITHUB_TOKEN" \\
+    https://raw.githubusercontent.com/${REPO}/master/install.sh | bash
   ./install.sh [options]
 
 Options:
@@ -157,8 +163,22 @@ normalize_tag() {
   esac
 }
 
+resolve_github_token() {
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    return
+  fi
+  if [ -n "${GH_TOKEN:-}" ]; then
+    GITHUB_TOKEN="$GH_TOKEN"
+    return
+  fi
+  if command -v gh >/dev/null 2>&1; then
+    GITHUB_TOKEN="$(gh auth token 2>/dev/null || true)"
+  fi
+}
+
 github_api() {
   local url="$1"
+  need_cmd curl
   if [ -n "${GITHUB_TOKEN:-}" ]; then
     curl --proto '=https' --tlsv1.2 -fsSL \
       -H "Authorization: Bearer ${GITHUB_TOKEN}" \
@@ -176,24 +196,117 @@ http_download() {
   local url="$1"
   local dest="$2"
   local quiet="${3:-0}"
+  local accept="${4:-*/*}"
+  local curl_log
 
   need_cmd curl
   if [ "$quiet" -eq 1 ]; then
-    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 1 -o "$dest" "$url" 2>/dev/null
-  elif [ -t 2 ]; then
-    curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-delay 1 -o "$dest" "$url"
+    curl_log="/dev/null"
   else
-    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 1 -o "$dest" "$url"
+    curl_log="/dev/stderr"
   fi
+
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    if [ "$quiet" -eq 1 ] || [ ! -t 2 ]; then
+      curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 1 \
+        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        -H "Accept: ${accept}" \
+        -o "$dest" "$url" 2>"$curl_log"
+    else
+      curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-delay 1 \
+        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        -H "Accept: ${accept}" \
+        -o "$dest" "$url"
+    fi
+  else
+    if [ "$quiet" -eq 1 ]; then
+      curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 1 \
+        -H "Accept: ${accept}" -o "$dest" "$url" 2>/dev/null
+    elif [ -t 2 ]; then
+      curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-delay 1 \
+        -H "Accept: ${accept}" -o "$dest" "$url"
+    else
+      curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 1 \
+        -H "Accept: ${accept}" -o "$dest" "$url"
+    fi
+  fi
+}
+
+github_not_found_hint() {
+  cat >&2 <<HINT
+error: could not look up GitHub releases for ${REPO} (404).
+This repository is private, so anonymous curl gets a 404.
+Log in and retry with:
+
+  export GITHUB_TOKEN="\$(gh auth token)"
+  curl -fsSL -H "Authorization: Bearer \$GITHUB_TOKEN" \\
+    https://raw.githubusercontent.com/${REPO}/master/install.sh | bash
+
+Or make the repository public if you want the unauthenticated one-liner.
+HINT
 }
 
 latest_release_tag() {
   local json tag
-  json="$(github_api "${GITHUB_API}/releases/latest")" \
-    || fail "could not look up the latest GitHub release for ${REPO}"
+  json="$(github_api "${GITHUB_API}/releases/latest")" || {
+    github_not_found_hint
+    exit 1
+  }
   tag="$(printf '%s\n' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
   [ -n "$tag" ] || fail "could not parse the latest release tag for ${REPO}"
   printf '%s\n' "$tag"
+}
+
+release_json() {
+  local tag="$1"
+  if [ "$tag" = "latest" ]; then
+    github_api "${GITHUB_API}/releases/latest"
+  else
+    github_api "${GITHUB_API}/releases/tags/${tag}"
+  fi
+}
+
+asset_api_url() {
+  local json="$1"
+  local name="$2"
+  local field="${3:-url}"
+
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$json" | python3 -c '
+import json, sys
+name, field = sys.argv[1], sys.argv[2]
+rel = json.load(sys.stdin)
+for asset in rel.get("assets", []):
+    if asset.get("name") == name:
+        value = asset.get(field) or ""
+        if value:
+            print(value)
+            raise SystemExit(0)
+raise SystemExit(1)
+' "$name" "$field"
+    return
+  fi
+
+  # Last-resort parse: GitHub puts "url" before "name" on each asset.
+  printf '%s' "$json" | tr ',' '\n' | awk -v name="$name" -v field="$field" '
+    $0 ~ "\"" field "\"" {
+      sub(/.*:[[:space:]]*"/, "")
+      sub(/".*/, "")
+      url = $0
+    }
+    $0 ~ "\"name\"" {
+      sub(/.*:[[:space:]]*"/, "")
+      sub(/".*/, "")
+      if ($0 == name && url != "") {
+        print url
+        found = 1
+        exit
+      }
+    }
+    END { if (!found) exit 1 }
+  '
 }
 
 resolve_tag() {
@@ -334,26 +447,47 @@ download_release_package() {
   local tag="$1"
   local target="$2"
   local quiet="${3:-0}"
-  local tmp archive sums url sums_url
+  local tmp archive sums url sums_url json name sums_name accept
 
   tmp="$(make_tempdir)"
-  archive="${tmp}/$(asset_name "$tag" "$target")"
+  name="$(asset_name "$tag" "$target")"
+  sums_name="${name}.sha256"
+  archive="${tmp}/${name}"
   sums="${archive}.sha256"
-  url="$(asset_url "$tag" "$target")"
-  sums_url="$(checksum_url "$tag" "$target")"
+  accept="*/*"
 
   RELEASE_ARCHIVE=""
   RELEASE_CHECKSUM=""
 
-  if [ "$quiet" -eq 0 ]; then
-    info "downloading ${url}"
+  json="$(release_json "$tag" 2>/dev/null || true)"
+  if [ -n "$json" ]; then
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+      url="$(asset_api_url "$json" "$name" url || true)"
+      sums_url="$(asset_api_url "$json" "$sums_name" url || true)"
+      accept="application/octet-stream"
+    else
+      url="$(asset_api_url "$json" "$name" browser_download_url || true)"
+      sums_url="$(asset_api_url "$json" "$sums_name" browser_download_url || true)"
+    fi
   fi
-  if ! http_download "$url" "$archive" "$quiet"; then
+  if [ -z "$url" ]; then
+    url="$(asset_url "$tag" "$target")"
+    sums_url="$(checksum_url "$tag" "$target")"
+    accept="*/*"
+  fi
+  if [ -z "$sums_url" ]; then
+    sums_url="$(checksum_url "$tag" "$target")"
+  fi
+
+  if [ "$quiet" -eq 0 ]; then
+    info "downloading ${name}"
+  fi
+  if ! http_download "$url" "$archive" "$quiet" "$accept"; then
     return 1
   fi
-  if ! http_download "$sums_url" "$sums" 1; then
+  if ! http_download "$sums_url" "$sums" 1 "$accept"; then
     if [ "$quiet" -eq 0 ]; then
-      warn "checksum file not found at ${sums_url}"
+      warn "checksum file not found for ${name}"
     fi
     return 1
   fi
@@ -542,6 +676,8 @@ done
 if [ "$FROM_RELEASE" -eq 1 ] && [ "$FROM_SOURCE" -eq 1 ]; then
   fail "use only one of --from-release or --from-source"
 fi
+
+resolve_github_token
 
 SCRIPT_DIR=""
 if resolved_dir="$(resolve_script_dir)"; then
