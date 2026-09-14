@@ -1,3 +1,12 @@
+## dd_dotstore v1.3.0
+
+Curl installer and prebuilt Linux packages.
+
+- `curl | bash` detects OS/arch and installs the matching musl package from GitHub Releases (`x86_64` or `aarch64`), plus the theme file.
+- Source checkout `./install.sh` still builds with Cargo. `--from-release`, `--from-source`, `--tag`, and `--tarball` are available.
+- GitHub Actions `Release` workflow publishes `dd_dotstore-<tag>-<target>.tar.gz` and SHA-256 checksums on `v*.*.*` tags.
+- CI checks `install.sh` syntax.
+
 ## dd_dotstore v1.2.1
 
 Tagged release of the v1.2 line on `master` (PRs #1–#6). Same features as v1.2.0; crate version is now `1.2.1` so `--version` matches the git tag.

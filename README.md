@@ -130,27 +130,46 @@ All future ldnddev TUI tools (such as dd_ftp) are expected to follow the same st
 
 ## Install
 
+The installer detects your OS/architecture and installs the matching Linux package (`x86_64` or `aarch64` musl) from GitHub Releases, plus the theme file.
+
 ```bash
-# Build release binary, install to ~/.local/bin, and copy the theme to
-# ~/.config/ldnddev/dd_dotstore_theme.yml
-./install.sh
+# Recommended: download the prebuilt package for this machine
+curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
+
+# Specific release
+curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.3.0
 
 # Install somewhere else
-PREFIX=/usr/local ./install.sh
-BINDIR=/opt/bin ./install.sh
-
-# Use a custom config root for the global theme
-XDG_CONFIG_HOME="$HOME/.config" ./install.sh
+PREFIX=/usr/local curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
+BINDIR=/opt/bin curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
 
 # Verify
 dd_dotstore --help
 ```
 
-The installer requires Rust 1.85+ (edition 2024) and `cargo`. It warns if the target bin directory is not on `PATH`.
+Pipe the script to `bash` (not `sh`). Default install location is `~/.local/bin`; the theme goes to `~/.config/ldnddev/dd_dotstore_theme.yml`. If a prebuilt package is not available, the script clones the repo and builds with Cargo (Rust 1.85+).
+
+From a source checkout:
+
+```bash
+# Build release binary, install to ~/.local/bin, and copy the theme
+./install.sh
+
+# Force the GitHub package even from a checkout
+./install.sh --from-release
+
+# Use a custom config root for the global theme
+XDG_CONFIG_HOME="$HOME/.config" ./install.sh
+```
+
+The installer warns if the target bin directory is not on `PATH`.
 
 ## Uninstall
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --uninstall
+
+# From a source checkout
 ./install.sh -uninstall
 # or
 ./install.sh --uninstall
