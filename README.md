@@ -19,6 +19,9 @@ TUI tool to manage Linux dotfiles: select project folder, assign destinations, c
 - Symlink status icons (✓ valid, ○ planned, ✗ broken, ? unknown)
 - Smart dest defaults (XDG / `$HOME` / labeled `.linked` fallback) shown dim on the source row
 - Import/export configs (`~/.dd_dotstore/exports/`, newest-first import list)
+- Named groups (`t` / `T`) so a package like `nvim` or `shell` can be selected and applied together
+- Reverse import (`A`): find `$HOME` / XDG symlinks that already point at this project and add them to the map
+- Doctor (`D`): broken/drifted dests, planned-but-missing dests, and orphan project symlinks not in config
 - Unified plan dialog + overwrite warnings (every real DIR named)
 - Passive info/error notices appear as bottom-right toasts for 5 seconds
 - Help (`F1`) and credits (`F2`) modals
@@ -42,6 +45,10 @@ u               Undo last action
 /               Open filter
 r               Reload tree
 I               Edit ignore patterns
+t               Set group on highlight or checkboxes
+T               Select every item in the highlight's group
+A               Reverse-import HOME/XDG symlinks that point at this project
+D               Doctor (broken, planned, unknown, orphan)
 i / E           Import / Export config
 
 
@@ -142,7 +149,7 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
 
 # Specific release
 curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.3.0
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.4.0
 
 # Install somewhere else
 PREFIX=/usr/local curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \

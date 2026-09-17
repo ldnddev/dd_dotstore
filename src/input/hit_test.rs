@@ -102,6 +102,10 @@ pub fn display_name_and_badge(node: &Node) -> (String, String) {
     if matches!(&node.kind, NodeKind::Folder { dest: None, .. }) && node.has_configured_descendant {
         name.push_str(BADGE_CONFIGURED);
     }
+    if let Some(group) = node.group.as_ref() {
+        name.push_str(" ·");
+        name.push_str(group);
+    }
     (tree_prefix.to_string(), name)
 }
 

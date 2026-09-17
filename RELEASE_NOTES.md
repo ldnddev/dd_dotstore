@@ -1,3 +1,11 @@
+## dd_dotstore v1.4.0
+
+Groups, reverse import, and doctor.
+
+- Named groups (`t` / `T`) persist in `.dd_dotstore.json`. Source filter matches group names; `T` selects a group for apply.
+- Reverse import (`A`) finds `$HOME` / XDG symlinks that already point at this project and records them as LINK dests.
+- Doctor (`D`) lists broken/drifted dests, planned-but-missing dests, unknown metadata, and orphan project symlinks. Enter jumps to the source row.
+
 ## dd_dotstore v1.3.0
 
 Curl installer and prebuilt Linux packages.

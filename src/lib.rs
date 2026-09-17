@@ -2,6 +2,7 @@ pub mod actions;
 pub mod app;
 pub mod domain;
 pub mod input;
+pub mod scan;
 pub mod theme;
 pub mod tree;
 pub mod ui;

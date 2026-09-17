@@ -434,6 +434,46 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             }
         }
 
+        Some(Modal::Adopt {
+            candidates,
+            selected: _selected,
+            checked,
+        }) => {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                let content_top = modal_area.y + 2;
+                if mouse.row >= content_top {
+                    let rel = (mouse.row - content_top) as usize;
+                    if rel < candidates.len() {
+                        state.modal = Some(Modal::Adopt {
+                            candidates,
+                            selected: rel,
+                            checked,
+                        });
+                    }
+                }
+            }
+        }
+
+        Some(Modal::Doctor {
+            findings,
+            selected: _selected,
+            scroll,
+        }) => {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                let content_top = modal_area.y + 2;
+                if mouse.row >= content_top {
+                    let rel = (mouse.row - content_top) as usize + scroll;
+                    if rel < findings.len() {
+                        state.modal = Some(Modal::Doctor {
+                            findings,
+                            selected: rel,
+                            scroll,
+                        });
+                    }
+                }
+            }
+        }
+
         Some(Modal::ImportPicker {
             files,
             selected: _selected,
@@ -477,7 +517,8 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
         Some(Modal::IgnoreEditor { .. })
         | Some(Modal::Help)
         | Some(Modal::Credits)
-        | Some(Modal::ExportPicker { .. }) => {
+        | Some(Modal::ExportPicker { .. })
+        | Some(Modal::GroupEditor { .. }) => {
             // no special mouse row logic
         }
 

@@ -1,7 +1,10 @@
 use crate::domain::{
     Action, ActionMode, AppState, BulkAction, Conflict, HISTORY_CAP, Modal, Node, NodeKind,
 };
-use crate::tree::{find_mut_node, find_node, flatten_visible, set_action_mode, set_dest};
+use crate::scan::{adopt_candidates_for_state, collect_doctor_findings};
+use crate::tree::{
+    expand_ancestors, find_mut_node, find_node, flatten_visible, set_action_mode, set_dest,
+};
 use crate::ui::toast::ToastLevel;
 use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
@@ -403,10 +406,16 @@ pub fn collect_preview_lines(state: &AppState, action: BulkAction) -> Vec<String
                 } else {
                     "=>"
                 };
+                let group = node
+                    .group
+                    .as_ref()
+                    .map(|g| format!(" [{g}]"))
+                    .unwrap_or_default();
                 let mut line = format!(
-                    "{} {} {} {}",
+                    "{} {}{} {} {}",
                     node.action_mode.label(),
                     node.path.display(),
+                    group,
                     arrow,
                     dest.display()
                 );
@@ -601,6 +610,7 @@ pub fn import_from_path(state: &mut AppState, import_path: &Path) -> Result<()> 
     let imported = crate::domain::load_persistent(import_path)?;
     state.persisted_symlinks = imported.symlinks;
     state.persisted_modes = imported.modes;
+    state.persisted_groups = imported.groups;
     state.history = imported.history.into_iter().collect();
     // 1.1 JSON without the key must not clobber session ignores.
     if let Some(pats) = imported.ignore_patterns {
@@ -640,6 +650,150 @@ pub fn export_to_path(state: &mut AppState, export_path: &Path) -> Result<()> {
     );
     state.persist_now_or_toast();
     Ok(())
+}
+
+pub fn open_group_editor(state: &mut AppState) {
+    let paths = action_targets(state);
+    if paths.is_empty() {
+        return;
+    }
+    let mut names: Vec<String> = paths
+        .iter()
+        .filter_map(|p| find_node(&state.tree, p).and_then(|n| n.group.clone()))
+        .collect();
+    names.sort();
+    names.dedup();
+    let draft = if names.len() == 1 {
+        names[0].clone()
+    } else {
+        String::new()
+    };
+    state.modal = Some(Modal::GroupEditor { paths, draft });
+}
+
+pub fn apply_group_name(state: &mut AppState, paths: &[PathBuf], draft: &str) {
+    let group = {
+        let trimmed = draft.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    };
+    let mut changed = false;
+    for path in paths {
+        if let Some(node) = find_mut_node(&mut state.tree, path)
+            && node.group != group
+        {
+            node.group = group.clone();
+            changed = true;
+        }
+    }
+    if changed {
+        state.mark_dirty();
+        flatten_visible(state);
+        state.persist_now_or_toast();
+        let msg = match &group {
+            Some(name) => format!("Grouped {} item(s) as {name}", paths.len()),
+            None => format!("Cleared group on {} item(s)", paths.len()),
+        };
+        state.show_toast(ToastLevel::Success, msg);
+    }
+}
+
+pub fn select_group_of_highlight(state: &mut AppState) {
+    let Some(idx) = state.list_state.selected() else {
+        return;
+    };
+    let Some(group) = state.nodes.get(idx).and_then(|n| n.group.clone()) else {
+        state.show_toast(ToastLevel::Info, "No group on this item");
+        return;
+    };
+    let count = select_nodes_in_group(&mut state.tree, &group);
+    flatten_visible(state);
+    state.show_toast(
+        ToastLevel::Info,
+        format!("Selected {count} item(s) in group {group}"),
+    );
+}
+
+fn select_nodes_in_group(nodes: &mut [Node], group: &str) -> usize {
+    let mut count = 0;
+    for node in nodes {
+        if node.group.as_deref() == Some(group) {
+            node.selected = true;
+            count += 1;
+        }
+        if let NodeKind::Folder { children, .. } = &mut node.kind {
+            count += select_nodes_in_group(children, group);
+        }
+    }
+    count
+}
+
+pub fn open_adopt_picker(state: &mut AppState) {
+    let candidates = adopt_candidates_for_state(state);
+    if candidates.is_empty() {
+        state.show_toast(
+            ToastLevel::Info,
+            "No project symlinks found under $HOME / XDG that are missing from config",
+        );
+        return;
+    }
+    let checked = vec![true; candidates.len()];
+    state.modal = Some(Modal::Adopt {
+        candidates,
+        selected: 0,
+        checked,
+    });
+}
+
+pub fn apply_adopt_candidates(state: &mut AppState, candidates: &[crate::domain::AdoptCandidate]) {
+    let mut adopted = 0usize;
+    for candidate in candidates {
+        if find_node(&state.tree, &candidate.src).is_none() {
+            continue;
+        }
+        set_dest(
+            &mut state.tree,
+            &candidate.src,
+            Some(candidate.dest.clone()),
+        );
+        set_action_mode(&mut state.tree, &candidate.src, ActionMode::Symlink);
+        adopted += 1;
+    }
+    if adopted == 0 {
+        state.show_toast(ToastLevel::Warning, "Nothing to adopt");
+        return;
+    }
+    flatten_visible(state);
+    if let Err(err) = state.update_symlink_statuses() {
+        state.show_toast(ToastLevel::Error, format!("Status refresh failed: {err}"));
+    }
+    state.mark_dirty();
+    state.persist_now_or_toast();
+    state.show_toast(ToastLevel::Success, format!("Adopted {adopted} mapping(s)"));
+}
+
+pub fn open_doctor(state: &mut AppState) {
+    let findings = collect_doctor_findings(state);
+    if findings.is_empty() {
+        state.show_toast(ToastLevel::Success, "Doctor: no issues found");
+        return;
+    }
+    state.modal = Some(Modal::Doctor {
+        findings,
+        selected: 0,
+        scroll: 0,
+    });
+}
+
+pub fn jump_to_doctor_source(state: &mut AppState, src: &Path) {
+    expand_ancestors(state, src);
+    flatten_visible(state);
+    if let Some(idx) = state.nodes.iter().position(|n| n.path == src) {
+        state.list_state.select(Some(idx));
+    }
 }
 
 #[cfg(test)]

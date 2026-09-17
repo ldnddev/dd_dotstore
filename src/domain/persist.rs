@@ -17,6 +17,8 @@ pub struct PersistentData {
     /// Some(v) (including empty) = use v exactly.
     #[serde(default)]
     pub ignore_patterns: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub groups: HashMap<String, String>,
 }
 
 pub const PERSIST_IDLE: Duration = Duration::from_millis(300);
@@ -36,9 +38,10 @@ impl AppState {
     /// save() still walks state.tree; assigning persisted_* first means a later
     /// change that made save() read the maps would still be correct.
     pub fn persist_now(&mut self) -> Result<()> {
-        let (dests, modes) = crate::tree::snapshot_assignments(&self.tree);
-        self.persisted_symlinks = dests;
-        self.persisted_modes = modes;
+        let snap = crate::tree::snapshot_assignments(&self.tree);
+        self.persisted_symlinks = snap.dests;
+        self.persisted_modes = snap.modes;
+        self.persisted_groups = snap.groups;
         let path = self.config_path.clone();
         save(self, &path)?;
         self.dirty_since = None;
@@ -89,6 +92,7 @@ pub fn load(path: &Path) -> Result<AppState> {
     state.history = data.history.into_iter().collect();
     state.persisted_symlinks = data.symlinks;
     state.persisted_modes = data.modes;
+    state.persisted_groups = data.groups;
     if let Some(pats) = data.ignore_patterns {
         state.ignore_patterns = pats;
     }
@@ -96,12 +100,13 @@ pub fn load(path: &Path) -> Result<AppState> {
 }
 
 pub fn save(state: &AppState, path: &Path) -> Result<()> {
-    let (symlinks, modes) = crate::tree::collect_assignments(&state.tree);
+    let snap = crate::tree::collect_assignments(&state.tree);
     let data = PersistentData {
-        symlinks,
-        modes,
+        symlinks: snap.dests,
+        modes: snap.modes,
         history: state.history.iter().cloned().collect(),
         ignore_patterns: Some(state.ignore_patterns.clone()),
+        groups: snap.groups,
     };
 
     let json = serde_json::to_string_pretty(&data)?;

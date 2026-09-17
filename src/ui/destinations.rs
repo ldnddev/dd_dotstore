@@ -33,14 +33,18 @@ pub(crate) fn draw_status_panel(f: &mut Frame, state: &mut AppState, area: Rect)
                     NodeKind::Folder { .. } => theme.folder,
                     NodeKind::File { .. } => theme.file,
                 };
-                out.push(Line::from(vec![
+                let mut spans = vec![
                     Span::styled("• ", mode_style),
                     Span::styled(node.action_mode.label().to_string(), mode_style),
                     Span::raw(" "),
                     Span::styled(node.path.display().to_string(), kind_style),
-                    Span::raw(format!(" {arrow} ")),
-                    Span::styled(d.display().to_string(), mode_style),
-                ]));
+                ];
+                if let Some(group) = node.group.as_ref() {
+                    spans.push(Span::styled(format!(" ·{group}"), theme.secondary));
+                }
+                spans.push(Span::raw(format!(" {arrow} ")));
+                spans.push(Span::styled(d.display().to_string(), mode_style));
+                out.push(Line::from(spans));
                 paths.push(node.path.clone());
             }
             NodeKind::File { dest: None } | NodeKind::Folder { dest: None, .. } => {}

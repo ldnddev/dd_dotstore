@@ -46,6 +46,7 @@ pub fn build_tree(root: &Path, ignores: &[String]) -> Vec<Node> {
                 selected: false,
                 action_mode: ActionMode::Symlink,
                 symlink_status: SymlinkStatus::None,
+                group: None,
                 has_configured_descendant: false,
             };
 
@@ -70,7 +71,11 @@ pub fn build_tree(root: &Path, ignores: &[String]) -> Vec<Node> {
 /// compute keep and set expanded=true on folders that contain a match.
 /// Does not emit rows. Returns whether self or a descendant matches.
 fn annotate_filter_matches(node: &mut Node, query: &[char], keep: &mut HashSet<PathBuf>) -> bool {
-    let self_match = fuzzy_match(&node.name, query);
+    let self_match = fuzzy_match(&node.name, query)
+        || node
+            .group
+            .as_deref()
+            .is_some_and(|group| fuzzy_match(group, query));
     let mut child_match = false;
     if let NodeKind::Folder {
         children, expanded, ..
@@ -128,6 +133,7 @@ fn flatten_emit(
         selected: node.selected,
         action_mode: node.action_mode,
         symlink_status: node.symlink_status,
+        group: node.group.clone(),
         has_configured_descendant,
     };
     let connector = if depth == 0 {
@@ -280,20 +286,35 @@ pub fn set_action_mode(nodes: &mut [Node], rel: &Path, action_mode: ActionMode) 
     }
 }
 
+pub fn set_group(nodes: &mut [Node], rel: &Path, group: Option<String>) {
+    if let Some(node) = find_mut_node(nodes, rel) {
+        node.group = group.filter(|g| !g.is_empty());
+    }
+}
+
+pub struct Assignments {
+    pub dests: HashMap<String, String>,
+    pub modes: HashMap<String, ActionMode>,
+    pub groups: HashMap<String, String>,
+}
+
 /// Walk the live tree using the same rules as save: dests only when `Some`,
-/// modes only when not the default LINK.
-pub fn collect_assignments(
-    tree: &[Node],
-) -> (HashMap<String, String>, HashMap<String, ActionMode>) {
+/// modes only when not the default LINK, groups only when named.
+pub fn collect_assignments(tree: &[Node]) -> Assignments {
     let mut dests = HashMap::new();
     let mut modes = HashMap::new();
+    let mut groups = HashMap::new();
     fn walk(
         node: &Node,
         dests: &mut HashMap<String, String>,
         modes: &mut HashMap<String, ActionMode>,
+        groups: &mut HashMap<String, String>,
     ) {
         if node.action_mode != ActionMode::Symlink {
             modes.insert(node.path.to_string_lossy().into_owned(), node.action_mode);
+        }
+        if let Some(group) = node.group.as_ref().filter(|g| !g.is_empty()) {
+            groups.insert(node.path.to_string_lossy().into_owned(), group.clone());
         }
         match &node.kind {
             NodeKind::File { dest: Some(d) } | NodeKind::Folder { dest: Some(d), .. } => {
@@ -306,19 +327,21 @@ pub fn collect_assignments(
         }
         if let NodeKind::Folder { children, .. } = &node.kind {
             for child in children {
-                walk(child, dests, modes);
+                walk(child, dests, modes, groups);
             }
         }
     }
     for node in tree {
-        walk(node, &mut dests, &mut modes);
+        walk(node, &mut dests, &mut modes, &mut groups);
     }
-    (dests, modes)
+    Assignments {
+        dests,
+        modes,
+        groups,
+    }
 }
 
-pub fn snapshot_assignments(
-    tree: &[Node],
-) -> (HashMap<String, String>, HashMap<String, ActionMode>) {
+pub fn snapshot_assignments(tree: &[Node]) -> Assignments {
     collect_assignments(tree)
 }
 
@@ -326,12 +349,16 @@ pub fn apply_persisted(
     tree: &mut [Node],
     dests: &HashMap<String, String>,
     modes: &HashMap<String, ActionMode>,
+    groups: &HashMap<String, String>,
 ) {
     for (rel, dest) in dests {
         set_dest(tree, Path::new(rel), Some(PathBuf::from(dest)));
     }
     for (rel, action_mode) in modes {
         set_action_mode(tree, Path::new(rel), *action_mode);
+    }
+    for (rel, group) in groups {
+        set_group(tree, Path::new(rel), Some(group.clone()));
     }
 }
 
@@ -349,17 +376,18 @@ pub fn rebuild_tree(state: &mut AppState, source: AssignmentSource) -> Result<()
         .and_then(|i| state.nodes.get(i))
         .map(|n| n.path.clone());
 
-    let (dests, modes) = match source {
+    let snap = match source {
         AssignmentSource::LiveTree => snapshot_assignments(&state.tree),
-        AssignmentSource::Persisted => (
-            state.persisted_symlinks.clone(),
-            state.persisted_modes.clone(),
-        ),
+        AssignmentSource::Persisted => Assignments {
+            dests: state.persisted_symlinks.clone(),
+            modes: state.persisted_modes.clone(),
+            groups: state.persisted_groups.clone(),
+        },
     };
 
     state.tree = build_tree(&state.project_root, &state.ignore_patterns);
     // Folders start collapsed; expand state is not restored across rebuild.
-    apply_persisted(&mut state.tree, &dests, &modes);
+    apply_persisted(&mut state.tree, &snap.dests, &snap.modes, &snap.groups);
 
     // Flatten happens inside update_symlink_statuses; reselect after that.
     state.update_symlink_statuses()?;

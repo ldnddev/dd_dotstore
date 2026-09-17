@@ -2,9 +2,11 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::actions::{
-    action_targets, assign_destination, collect_preview_lines, confirm_bulk,
-    confirm_bulk_with_overwrite, export_to_path, import_from_path, open_export_picker,
-    open_import_picker, selected_create_conflicts, undo_last,
+    action_targets, apply_adopt_candidates, apply_group_name, assign_destination,
+    collect_preview_lines, confirm_bulk, confirm_bulk_with_overwrite, export_to_path,
+    import_from_path, jump_to_doctor_source, open_adopt_picker, open_doctor, open_export_picker,
+    open_group_editor, open_import_picker, select_group_of_highlight, selected_create_conflicts,
+    undo_last,
 };
 use crate::domain::{AppState, BrowserState, BulkAction, Modal, Node, NodeKind};
 use crate::tree::{
@@ -85,6 +87,10 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
 
         KeyCode::Char('i') => open_import_picker(state)?,
         KeyCode::Char('E') => open_export_picker(state)?,
+        KeyCode::Char('t') => open_group_editor(state),
+        KeyCode::Char('T') => select_group_of_highlight(state),
+        KeyCode::Char('A') => open_adopt_picker(state),
+        KeyCode::Char('D') => open_doctor(state),
 
         _ => {}
     }
@@ -579,6 +585,127 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 _ => {}
             }
             state.modal = Some(Modal::ExportPicker { dir, filename });
+        }
+
+        Modal::GroupEditor { paths, mut draft } => {
+            match key.code {
+                KeyCode::Char(c)
+                    if key.modifiers.is_empty() && (c.is_ascii_graphic() || c == ' ') =>
+                {
+                    draft.push(c);
+                }
+                KeyCode::Backspace => {
+                    let _ = draft.pop();
+                }
+                KeyCode::Enter => {
+                    apply_group_name(state, &paths, &draft);
+                    state.modal = None;
+                    return Ok(false);
+                }
+                KeyCode::Esc => {
+                    state.modal = None;
+                    return Ok(false);
+                }
+                _ => {}
+            }
+            if state.modal.is_some() {
+                state.modal = Some(Modal::GroupEditor { paths, draft });
+            }
+        }
+
+        Modal::Adopt {
+            candidates,
+            mut selected,
+            mut checked,
+        } => {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => selected = selected.saturating_sub(1),
+                KeyCode::Down | KeyCode::Char('j') => {
+                    selected = (selected + 1).min(candidates.len().saturating_sub(1));
+                }
+                KeyCode::Char(' ') => {
+                    if let Some(flag) = checked.get_mut(selected) {
+                        *flag = !*flag;
+                    }
+                }
+                KeyCode::Char('a') => {
+                    let all = checked.iter().all(|c| *c);
+                    for flag in checked.iter_mut() {
+                        *flag = !all;
+                    }
+                }
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    let chosen: Vec<_> = if checked.iter().any(|c| *c) {
+                        candidates
+                            .iter()
+                            .zip(checked.iter())
+                            .filter(|(_, on)| **on)
+                            .map(|(c, _)| c.clone())
+                            .collect()
+                    } else {
+                        candidates.get(selected).cloned().into_iter().collect()
+                    };
+                    apply_adopt_candidates(state, &chosen);
+                    state.modal = None;
+                    return Ok(false);
+                }
+                KeyCode::Esc => {
+                    state.modal = None;
+                    return Ok(false);
+                }
+                _ => {}
+            }
+            if state.modal.is_some() {
+                state.modal = Some(Modal::Adopt {
+                    candidates,
+                    selected,
+                    checked,
+                });
+            }
+        }
+
+        Modal::Doctor {
+            findings,
+            mut selected,
+            mut scroll,
+        } => {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    selected = selected.saturating_sub(1);
+                    if selected < scroll {
+                        scroll = selected;
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    selected = (selected + 1).min(findings.len().saturating_sub(1));
+                    if selected > scroll + 8 {
+                        scroll = selected.saturating_sub(8);
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(src) = findings.get(selected).and_then(|f| f.src.clone()) {
+                        jump_to_doctor_source(state, &src);
+                    }
+                    state.modal = None;
+                    return Ok(false);
+                }
+                KeyCode::Char('A') => {
+                    open_adopt_picker(state);
+                    return Ok(false);
+                }
+                KeyCode::Esc => {
+                    state.modal = None;
+                    return Ok(false);
+                }
+                _ => {}
+            }
+            if state.modal.is_some() {
+                state.modal = Some(Modal::Doctor {
+                    findings,
+                    selected,
+                    scroll,
+                });
+            }
         }
     }
 

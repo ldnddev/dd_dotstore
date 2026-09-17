@@ -29,6 +29,7 @@ src/
 ├── theme.rs             # Theme, ThemeFile (serde_yaml), load_theme
 ├── tree.rs              # build_tree, flatten_visible, rebuild_tree, assignments
 ├── actions.rs           # create/remove/undo/import/export, planned_dest, plan lines
+├── scan.rs              # HOME/XDG symlink adopt scan + doctor findings
 ├── input/
 │   ├── mod.rs           # handle_key / handle_mouse re-exports
 │   ├── keys.rs
@@ -70,11 +71,11 @@ Centered modals (plan, overwrite, dest browser, ignore editor, help, credits, im
 
 - **App** (`src/app.rs`) — `new_with_root` loads JSON + theme, then `rebuild_tree(Persisted)`. `tick` expires toasts and flushes dirty persist.
 - **AppState** (`src/domain/mod.rs`) — tree, flattened `nodes`, filter + `filter_editing` / `filter_snapshot`, modal, history, ignores, theme, persist maps, dirty/retry clocks, `pointer: PointerState`.
-- **Node** — name, relative path, `NodeKind`, selected, `action_mode`, `symlink_status`, `has_configured_descendant` (display-only, set at flatten).
+- **Node** — name, relative path, `NodeKind`, selected, `action_mode`, `symlink_status`, `group`, `has_configured_descendant` (display-only, set at flatten).
 - **NodeKind** — `File { dest }` | `Folder { children, expanded, dest }`.
 - **SymlinkStatus** — `None` | `Planned` (assigned dest `NotFound`) | `Valid` | `Broken` | `Unknown` (other metadata errors).
 - **Action** — `Create` / `Remove` / `Copy` / `RemoveCopy`.
-- **Modal** — `EditDest`, `Plan { action, scroll }`, `OverwriteWarning { conflicts, action_type, scroll }`, `IgnoreEditor { selected, draft }`, `Help`, `Credits`, `ImportPicker`, `ExportPicker`.
+- **Modal** — `EditDest`, `Plan { action, scroll }`, `OverwriteWarning { conflicts, action_type, scroll }`, `IgnoreEditor { selected, draft }`, `Help`, `Credits`, `ImportPicker`, `ExportPicker`, `GroupEditor`, `Adopt`, `Doctor`.
 - **PointerState** — layout rects and mouse session flags. Persisted JSON does not mention `Rect`.
 - **Theme** — `serde_yaml` `ThemeFile`; lookup `./dd_dotstore_theme.yml` → `$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml` → built-in. `XDG_CONFIG_HOME` falls back to `$HOME/.config`. Schema `version: 1`, every color key, `#RRGGBB`.
 
@@ -93,6 +94,10 @@ Centered modals (plan, overwrite, dest browser, ignore editor, help, credits, im
 - `/`              → focus inline source-title filter (does not clear)
 - `r`              → reload tree (keeps dests/modes; expand state resets)
 - `I`              → ignore editor (list / add / delete, persisted)
+- `t`              → set group on highlight or checkboxes
+- `T`              → select every item in the highlight's group
+- `A`              → reverse-import HOME/XDG symlinks pointing at this project
+- `D`              → doctor (broken / planned / unknown / orphan)
 - `i` / `E`        → import / export
 - `F1` / `F2`      → help / credits
 
@@ -100,12 +105,12 @@ Click inside a confirm/overwrite/plan dialog is a no-op; click outside cancels. 
 
 ## Persistence
 
-- `.dd_dotstore.json` in the project root: `symlinks`, `modes`, `history`, `ignore_patterns`
-- `save` walks the live tree via `collect_assignments` (dest `Some` only; non-default modes only)
+- `.dd_dotstore.json` in the project root: `symlinks`, `modes`, `history`, `ignore_patterns`, `groups`
+- `save` walks the live tree via `collect_assignments` (dest `Some` only; non-default modes only; named groups only)
 - Idle auto-save: `mark_dirty` → 300 ms idle in `tick` → `persist_now`. Immediate flush after bulk apply, undo, import, ignore add/delete
 - Save failures toast once per message and retry every 5 s. Clean exit: `persist_now_if_dirty` while the TUI is still up, restore the tty, then `eprintln` the save error if any
 - `rebuild_tree(LiveTree | Persisted)` is the single rebuild path (init, `r`, reload, import, ignore-edit)
-- Missing `modes` / `ignore_patterns` keys deserialize to default. Import copies ignores only when `Some`
+- Missing `modes` / `ignore_patterns` / `groups` keys deserialize to default. Import copies ignores only when `Some`
 
 ## Status glyphs
 

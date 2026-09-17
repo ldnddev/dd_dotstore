@@ -75,7 +75,7 @@ fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     } else if area.width < 110 {
         "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   q: Quit"
     } else {
-        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   q: Quit   (mouse: click/scroll/drag)"
+        "F1: Help   t: Group   A: Adopt   D: Doctor   s: Apply   x: Remove   q: Quit   (mouse: click/scroll/drag)"
     };
 
     let bar = Paragraph::new(Line::from(keys))

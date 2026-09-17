@@ -1,4 +1,4 @@
-use crate::domain::{AppState, BulkAction, Conflict, Modal};
+use crate::domain::{AppState, BulkAction, Conflict, DoctorSeverity, Modal};
 use crate::ui::centered_rect;
 use ratatui::{
     Frame,
@@ -223,8 +223,12 @@ s / p        Plan apply (highlight or checkboxes; Y applies)\n\
 x            Plan remove (highlight or checkboxes; Y applies)\n\
 m            Toggle LINK/COPY for highlighted item\n\
 M            Set selected items to the next LINK/COPY mode\n\
+t            Set group on highlight or checkboxes\n\
+T            Select every item in the highlight's group\n\
+A            Reverse-import HOME/XDG symlinks that point at this project\n\
+D            Doctor: broken, planned, unknown, and orphan links\n\
 u            Undo last action\n\
-/            Focus source filter (does not clear)\n\
+/            Focus source filter (does not clear; also matches group names)\n\
 r            Reload tree\n\
 I            Ignore editor (list / add / delete, persisted)\n\
 i            Import picker\n\
@@ -329,6 +333,94 @@ Press Esc/F2 to close.",
                         .style(state.theme.modal),
                 )
                 .style(state.theme.input_text_focus);
+                f.render_widget(text, modal_area);
+            }
+            Modal::GroupEditor { paths, draft } => {
+                let text = Paragraph::new(format!(
+                    "Items: {}\nGroup: {draft}█\n\nEnter save (empty clears). Esc cancel.",
+                    paths.len()
+                ))
+                .block(
+                    Block::default()
+                        .title("Group")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.input_border_focus)
+                        .style(state.theme.modal),
+                )
+                .style(state.theme.input_text_focus);
+                f.render_widget(text, modal_area);
+            }
+            Modal::Adopt {
+                candidates,
+                selected,
+                checked,
+            } => {
+                let mut lines: Vec<Line<'_>> =
+                    vec![Line::from("Space toggle   a all   Y adopt   Esc cancel")];
+                for (i, candidate) in candidates.iter().enumerate() {
+                    let mark = if checked.get(i).copied().unwrap_or(false) {
+                        "[✓]"
+                    } else {
+                        "[ ]"
+                    };
+                    let cursor = if i == *selected { ">" } else { " " };
+                    let style = if i == *selected {
+                        state.theme.selected
+                    } else {
+                        state.theme.modal_text
+                    };
+                    lines.push(Line::from(Span::styled(
+                        format!(
+                            "{cursor} {mark} {} -> {}",
+                            candidate.src.display(),
+                            candidate.dest.display()
+                        ),
+                        style,
+                    )));
+                }
+                let text = Paragraph::new(lines).block(
+                    Block::default()
+                        .title("Adopt project symlinks")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.active_border)
+                        .style(state.theme.modal),
+                );
+                f.render_widget(text, modal_area);
+            }
+            Modal::Doctor {
+                findings,
+                selected,
+                scroll,
+            } => {
+                let view_h = modal_area.height.saturating_sub(4) as usize;
+                let start = (*scroll).min(findings.len().saturating_sub(1));
+                let mut lines: Vec<Line<'_>> = vec![Line::from(
+                    "j/k move   Enter jump to source   A adopt orphans   Esc close",
+                )];
+                for (i, finding) in findings.iter().enumerate().skip(start).take(view_h.max(1)) {
+                    let sev_style = match finding.severity {
+                        DoctorSeverity::Critical => state.theme.error,
+                        DoctorSeverity::Warning => state.theme.warning,
+                        DoctorSeverity::Info => state.theme.info,
+                    };
+                    let row_style = if i == *selected {
+                        state.theme.selected
+                    } else {
+                        sev_style
+                    };
+                    let cursor = if i == *selected { ">" } else { " " };
+                    lines.push(Line::from(Span::styled(
+                        format!("{cursor} {}", finding.line()),
+                        row_style,
+                    )));
+                }
+                let text = Paragraph::new(lines).block(
+                    Block::default()
+                        .title(format!("Doctor ({})", findings.len()))
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.active_border)
+                        .style(state.theme.modal),
+                );
                 f.render_widget(text, modal_area);
             }
         }

@@ -52,6 +52,8 @@ pub struct Node {
     pub selected: bool,
     pub action_mode: ActionMode,
     pub symlink_status: SymlinkStatus,
+    /// Optional apply-group name (nvim, shell, …). Persisted when non-empty.
+    pub group: Option<String>,
     /// Display-only. Set from the live tree at flatten; not persisted.
     pub has_configured_descendant: bool,
 }

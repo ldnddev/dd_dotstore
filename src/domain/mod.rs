@@ -1,8 +1,10 @@
 mod action;
+mod health;
 mod node;
 mod persist;
 
 pub use action::*;
+pub use health::*;
 pub use node::*;
 pub use persist::*;
 
@@ -42,6 +44,20 @@ pub enum Modal {
     ExportPicker {
         dir: PathBuf,
         filename: String,
+    },
+    GroupEditor {
+        paths: Vec<PathBuf>,
+        draft: String,
+    },
+    Adopt {
+        candidates: Vec<AdoptCandidate>,
+        selected: usize,
+        checked: Vec<bool>,
+    },
+    Doctor {
+        findings: Vec<DoctorFinding>,
+        selected: usize,
+        scroll: usize,
     },
 }
 
@@ -179,6 +195,7 @@ pub struct AppState {
     pub header_copy: String,
     pub persisted_symlinks: HashMap<String, String>,
     pub persisted_modes: HashMap<String, ActionMode>,
+    pub persisted_groups: HashMap<String, String>,
     pub dirty_since: Option<Instant>,
     pub persist_retry_at: Option<Instant>,
     pub last_save_error: Option<String>,
