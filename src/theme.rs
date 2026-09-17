@@ -56,7 +56,7 @@ impl Default for ThemeStatus {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ThemeColors {
     pub base_background: Color,
     pub body_background: Color,
@@ -250,8 +250,203 @@ impl Default for Theme {
     }
 }
 
-const THEME_FILE_NAME: &str = "dd_dotstore_theme.yml";
-const SUPPORTED_THEME_VERSION: u64 = 1;
+pub const THEME_FILE_NAME: &str = "dd_dotstore_theme.yml";
+pub const SUPPORTED_THEME_VERSION: u64 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemeSaveTarget {
+    Global,
+    Local,
+}
+
+impl ThemeSaveTarget {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Local => "local",
+        }
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Global => Self::Local,
+            Self::Local => Self::Global,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ColorField {
+    pub key: &'static str,
+    pub group: &'static str,
+}
+
+pub const COLOR_FIELDS: &[ColorField] = &[
+    ColorField {
+        key: "base_background",
+        group: "Surfaces",
+    },
+    ColorField {
+        key: "body_background",
+        group: "Surfaces",
+    },
+    ColorField {
+        key: "modal_background",
+        group: "Surfaces",
+    },
+    ColorField {
+        key: "selected_background",
+        group: "Surfaces",
+    },
+    ColorField {
+        key: "text_primary",
+        group: "Text",
+    },
+    ColorField {
+        key: "text_secondary",
+        group: "Text",
+    },
+    ColorField {
+        key: "text_labels",
+        group: "Text",
+    },
+    ColorField {
+        key: "text_active_focus",
+        group: "Text",
+    },
+    ColorField {
+        key: "modal_labels",
+        group: "Text",
+    },
+    ColorField {
+        key: "modal_text",
+        group: "Text",
+    },
+    ColorField {
+        key: "border_default",
+        group: "Chrome",
+    },
+    ColorField {
+        key: "border_active",
+        group: "Chrome",
+    },
+    ColorField {
+        key: "scrollbar",
+        group: "Chrome",
+    },
+    ColorField {
+        key: "scrollbar_hover",
+        group: "Chrome",
+    },
+    ColorField {
+        key: "input_border_default",
+        group: "Inputs",
+    },
+    ColorField {
+        key: "input_border_focus",
+        group: "Inputs",
+    },
+    ColorField {
+        key: "input_text_default",
+        group: "Inputs",
+    },
+    ColorField {
+        key: "input_text_focus",
+        group: "Inputs",
+    },
+    ColorField {
+        key: "cursor",
+        group: "Inputs",
+    },
+    ColorField {
+        key: "success",
+        group: "Status",
+    },
+    ColorField {
+        key: "warning",
+        group: "Status",
+    },
+    ColorField {
+        key: "error",
+        group: "Status",
+    },
+    ColorField {
+        key: "info",
+        group: "Status",
+    },
+    ColorField {
+        key: "folders",
+        group: "Tree",
+    },
+    ColorField {
+        key: "files",
+        group: "Tree",
+    },
+    ColorField {
+        key: "links",
+        group: "Tree",
+    },
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemeEditorRow {
+    Header(&'static str),
+    Color(usize),
+}
+
+pub fn theme_editor_rows() -> Vec<ThemeEditorRow> {
+    let mut rows = Vec::new();
+    let mut last_group = "";
+    for (i, field) in COLOR_FIELDS.iter().enumerate() {
+        if field.group != last_group {
+            rows.push(ThemeEditorRow::Header(field.group));
+            last_group = field.group;
+        }
+        rows.push(ThemeEditorRow::Color(i));
+    }
+    rows
+}
+
+#[derive(Clone, Debug)]
+pub struct ThemeEditor {
+    pub snapshot_colors: ThemeColors,
+    pub snapshot_quotes: Vec<String>,
+    pub snapshot_source: ThemeSource,
+    pub snapshot_version: u64,
+    pub selected: usize,
+    pub scroll: usize,
+    pub channel: usize,
+    pub hex_draft: String,
+    pub editing_hex: bool,
+    pub save_target: ThemeSaveTarget,
+}
+
+impl ThemeEditor {
+    pub fn from_theme(theme: &Theme) -> Self {
+        let hex_draft = color_to_hex(
+            theme
+                .colors
+                .get(COLOR_FIELDS[0].key)
+                .unwrap_or(Color::Black),
+        );
+        Self {
+            snapshot_colors: theme.colors,
+            snapshot_quotes: theme.header_quotes.clone(),
+            snapshot_source: theme.source,
+            snapshot_version: theme.version,
+            selected: 0,
+            scroll: 0,
+            channel: 0,
+            hex_draft,
+            editing_hex: false,
+            save_target: ThemeSaveTarget::Global,
+        }
+    }
+
+    pub fn selected_key(&self) -> &'static str {
+        COLOR_FIELDS[self.selected.min(COLOR_FIELDS.len() - 1)].key
+    }
+}
 
 const DEFAULT_HEADER_QUOTES: [&str; 5] = [
     "Don't Fear the . (Dot) - Tame It.",
@@ -393,6 +588,186 @@ fn parse_theme_colors(colors: Option<HashMap<String, String>>) -> Result<ThemeCo
         files: color!("files"),
         links: color!("links"),
     })
+}
+
+impl ThemeColors {
+    pub fn get(self, key: &str) -> Option<Color> {
+        Some(match key {
+            "base_background" => self.base_background,
+            "body_background" => self.body_background,
+            "modal_background" => self.modal_background,
+            "text_primary" => self.text_primary,
+            "text_secondary" => self.text_secondary,
+            "text_labels" => self.text_labels,
+            "text_active_focus" => self.text_active_focus,
+            "modal_labels" => self.modal_labels,
+            "modal_text" => self.modal_text,
+            "selected_background" => self.selected_background,
+            "border_default" => self.border_default,
+            "border_active" => self.border_active,
+            "scrollbar" => self.scrollbar,
+            "scrollbar_hover" => self.scrollbar_hover,
+            "input_border_default" => self.input_border_default,
+            "input_border_focus" => self.input_border_focus,
+            "input_text_default" => self.input_text_default,
+            "input_text_focus" => self.input_text_focus,
+            "cursor" => self.cursor,
+            "success" => self.success,
+            "warning" => self.warning,
+            "error" => self.error,
+            "info" => self.info,
+            "folders" => self.folders,
+            "files" => self.files,
+            "links" => self.links,
+            _ => return None,
+        })
+    }
+
+    pub fn set(&mut self, key: &str, color: Color) -> bool {
+        let slot = match key {
+            "base_background" => &mut self.base_background,
+            "body_background" => &mut self.body_background,
+            "modal_background" => &mut self.modal_background,
+            "text_primary" => &mut self.text_primary,
+            "text_secondary" => &mut self.text_secondary,
+            "text_labels" => &mut self.text_labels,
+            "text_active_focus" => &mut self.text_active_focus,
+            "modal_labels" => &mut self.modal_labels,
+            "modal_text" => &mut self.modal_text,
+            "selected_background" => &mut self.selected_background,
+            "border_default" => &mut self.border_default,
+            "border_active" => &mut self.border_active,
+            "scrollbar" => &mut self.scrollbar,
+            "scrollbar_hover" => &mut self.scrollbar_hover,
+            "input_border_default" => &mut self.input_border_default,
+            "input_border_focus" => &mut self.input_border_focus,
+            "input_text_default" => &mut self.input_text_default,
+            "input_text_focus" => &mut self.input_text_focus,
+            "cursor" => &mut self.cursor,
+            "success" => &mut self.success,
+            "warning" => &mut self.warning,
+            "error" => &mut self.error,
+            "info" => &mut self.info,
+            "folders" => &mut self.folders,
+            "files" => &mut self.files,
+            "links" => &mut self.links,
+            _ => return false,
+        };
+        *slot = color;
+        true
+    }
+}
+
+pub fn color_to_hex(color: Color) -> String {
+    let (r, g, b) = color_rgb(color);
+    format!("#{r:02X}{g:02X}{b:02X}")
+}
+
+pub fn color_rgb(color: Color) -> (u8, u8, u8) {
+    match color {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => (0, 0, 0),
+    }
+}
+
+pub fn parse_hex_input(value: &str) -> Result<Color> {
+    let trimmed = value.trim();
+    let with_hash = if trimmed.starts_with('#') {
+        trimmed.to_string()
+    } else {
+        format!("#{trimmed}")
+    };
+    parse_hex_color("color", &with_hash)
+}
+
+pub fn nudge_channel(color: Color, channel: usize, delta: i16) -> Color {
+    let (mut r, mut g, mut b) = color_rgb(color);
+    let slot = match channel % 3 {
+        0 => &mut r,
+        1 => &mut g,
+        _ => &mut b,
+    };
+    let next = i16::from(*slot) + delta;
+    *slot = next.clamp(0, 255) as u8;
+    Color::Rgb(r, g, b)
+}
+
+pub fn default_config_home() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+}
+
+pub fn local_theme_path(project_root: &Path) -> PathBuf {
+    project_root.join(THEME_FILE_NAME)
+}
+
+pub fn global_theme_path(config_home: &Path) -> PathBuf {
+    config_home.join("ldnddev").join(THEME_FILE_NAME)
+}
+
+pub fn save_theme(
+    theme: &Theme,
+    project_root: &Path,
+    target: ThemeSaveTarget,
+    config_home: Option<&Path>,
+) -> Result<PathBuf> {
+    let path = match target {
+        ThemeSaveTarget::Local => local_theme_path(project_root),
+        ThemeSaveTarget::Global => {
+            let home = config_home
+                .map(Path::to_path_buf)
+                .or_else(default_config_home)
+                .ok_or_else(|| {
+                    anyhow!("Cannot save global theme: XDG_CONFIG_HOME and HOME are unset")
+                })?;
+            global_theme_path(&home)
+        }
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create theme directory {}", parent.display()))?;
+    }
+    fs::write(&path, render_theme_yaml(theme))
+        .with_context(|| format!("Failed to write theme file {}", path.display()))?;
+    Ok(path)
+}
+
+pub fn render_theme_yaml(theme: &Theme) -> String {
+    let mut out = String::from("version: 1\n");
+    if !theme.header_quotes.is_empty() {
+        out.push_str("header_quotes:\n");
+        for quote in &theme.header_quotes {
+            out.push_str("  - ");
+            out.push_str(&yaml_quote(quote));
+            out.push('\n');
+        }
+    }
+    out.push_str("colors:\n");
+    let mut last_group = "";
+    for field in COLOR_FIELDS {
+        if field.group != last_group {
+            out.push_str("\n  # ");
+            out.push_str(field.group);
+            out.push('\n');
+            last_group = field.group;
+        }
+        let hex = theme
+            .colors
+            .get(field.key)
+            .map(color_to_hex)
+            .unwrap_or_else(|| "#000000".to_string());
+        out.push_str("  ");
+        out.push_str(field.key);
+        out.push_str(": \"");
+        out.push_str(&hex);
+        out.push_str("\"\n");
+    }
+    out
+}
+
+fn yaml_quote(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn parse_hex_color(key: &str, value: &str) -> Result<Color> {

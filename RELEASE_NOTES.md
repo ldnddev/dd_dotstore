@@ -1,3 +1,12 @@
+## dd_dotstore v1.5.0
+
+Live theme editor.
+
+- `C` opens a grouped color editor with live preview (Surfaces, Text, Chrome, Inputs, Status, Tree).
+- `Tab` chooses save target; **global** is the default (`$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml`). Local writes `./dd_dotstore_theme.yml`.
+- `Y` writes schema `version: 1` YAML and keeps `header_quotes`. `R` resets to built-in colors. Esc reverts unsaved edits.
+- Hex edit (Enter) and RGB nudge (`+/-`, `h`/`l`, `[`/`]` for channel). A local theme file still wins lookup after a global save.
+
 ## dd_dotstore v1.4.0
 
 Groups, reverse import, and doctor.

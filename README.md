@@ -14,6 +14,7 @@ TUI tool to manage Linux dotfiles: select project folder, assign destinations, c
 - Fuzzy filter on source panel
 - Ignore patterns (editable)
 - Shared ldnddev theme support
+- Theme editor (`C`): live-preview every color, save local or global (global default)
 - Theme schema version validation (`version: 1`)
 - Startup theme health/status in the footer
 - Symlink status icons (✓ valid, ○ planned, ✗ broken, ? unknown)
@@ -32,6 +33,7 @@ q / Q           Quit
 Esc             Close modal / clear filter / clear selection (does not quit)
 F1              Help modal
 F2              Credits modal
+C               Theme editor (Tab local/global save, Y write, R reset, Esc revert)
 j / k / ↑ / ↓   Navigate list
 Space           Toggle selection (file/folder)
 Enter           Edit destination (file/folder)
@@ -123,6 +125,8 @@ At startup, the footer shows theme health/status, including the active source an
 
 The credits modal shows the active theme source as `local`, `global`, or `default`.
 
+`C` opens a live theme editor. `Tab` switches the save target (`global` is the default: `$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml`; `local` writes `./dd_dotstore_theme.yml`). `Y` writes the YAML; `Esc` reverts unsaved edits. If a local file exists it still wins lookup, even after a global save.
+
 ## Visual Design Standard
 
 `dd_dotstore` follows the shared ldnddev TUI Visual Standard defined in `LDNDDEV_TUI_VISUAL_STANDARD.md`. This single document covers:
@@ -149,7 +153,7 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
 
 # Specific release
 curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.4.0
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.5.0
 
 # Install somewhere else
 PREFIX=/usr/local curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \

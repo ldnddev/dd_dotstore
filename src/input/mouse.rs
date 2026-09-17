@@ -2,7 +2,9 @@ use anyhow::Result;
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::time::Instant;
 
-use crate::actions::{assign_destination, collect_preview_lines};
+use crate::actions::{
+    assign_destination, collect_preview_lines, revert_theme_editor, theme_editor_select,
+};
 use crate::domain::{AppState, Modal, NodeKind};
 use crate::input::hit_test::{
     hit_test_source_row, is_over_scrollbar, rect_contains, zones_for_node,
@@ -295,6 +297,9 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
     let inside_modal = rect_contains(modal_area, mouse.column, mouse.row);
     if !inside_modal {
         // Outside click cancels the modal (Esc semantics for most)
+        if matches!(state.modal, Some(Modal::ThemeEditor(_))) {
+            revert_theme_editor(state);
+        }
         state.modal = None;
         return Ok(false);
     }
@@ -514,6 +519,33 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
         }
 
         // For help/credits/ignore/export: inside click does nothing special, outside cancelled
+        Some(Modal::ThemeEditor(editor)) => {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                let content_top = modal_area.y + 4;
+                if mouse.row >= content_top {
+                    let rel = (mouse.row - content_top) as usize;
+                    let rows = crate::theme::theme_editor_rows();
+                    let start = rows
+                        .iter()
+                        .position(|row| match row {
+                            crate::theme::ThemeEditorRow::Color(idx) => *idx >= editor.scroll,
+                            crate::theme::ThemeEditorRow::Header(_) => false,
+                        })
+                        .unwrap_or(0);
+                    let start = if start > 0
+                        && matches!(rows[start - 1], crate::theme::ThemeEditorRow::Header(_))
+                    {
+                        start - 1
+                    } else {
+                        start
+                    };
+                    if let Some(crate::theme::ThemeEditorRow::Color(idx)) = rows.get(start + rel) {
+                        theme_editor_select(state, *idx);
+                    }
+                }
+            }
+        }
+
         Some(Modal::IgnoreEditor { .. })
         | Some(Modal::Help)
         | Some(Modal::Credits)

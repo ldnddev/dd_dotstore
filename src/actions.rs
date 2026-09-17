@@ -2,6 +2,11 @@ use crate::domain::{
     Action, ActionMode, AppState, BulkAction, Conflict, HISTORY_CAP, Modal, Node, NodeKind,
 };
 use crate::scan::{adopt_candidates_for_state, collect_doctor_findings};
+use crate::theme::{
+    COLOR_FIELDS, Theme, ThemeColors, ThemeEditor, ThemeSaveTarget, ThemeSource, ThemeStatus,
+    color_to_hex, default_config_home, local_theme_path, nudge_channel, parse_hex_input,
+    save_theme,
+};
 use crate::tree::{
     expand_ancestors, find_mut_node, find_node, flatten_visible, set_action_mode, set_dest,
 };
@@ -793,6 +798,173 @@ pub fn jump_to_doctor_source(state: &mut AppState, src: &Path) {
     flatten_visible(state);
     if let Some(idx) = state.nodes.iter().position(|n| n.path == src) {
         state.list_state.select(Some(idx));
+    }
+}
+
+pub fn open_theme_editor(state: &mut AppState) {
+    state.modal = Some(Modal::ThemeEditor(ThemeEditor::from_theme(&state.theme)));
+}
+
+pub fn apply_theme_colors(state: &mut AppState, colors: ThemeColors) {
+    let quotes = state.theme.header_quotes.clone();
+    let source = state.theme.source;
+    let version = state.theme.version;
+    state.theme = Theme::from_colors(colors, source, version);
+    state.theme.header_quotes = quotes;
+}
+
+pub fn revert_theme_editor(state: &mut AppState) {
+    let Some((colors, quotes, source, version)) = theme_editor_snapshot(state) else {
+        return;
+    };
+    state.theme = Theme::from_colors(colors, source, version);
+    state.theme.header_quotes = quotes;
+}
+
+fn theme_editor_snapshot(state: &AppState) -> Option<(ThemeColors, Vec<String>, ThemeSource, u64)> {
+    match &state.modal {
+        Some(Modal::ThemeEditor(editor)) => Some((
+            editor.snapshot_colors,
+            editor.snapshot_quotes.clone(),
+            editor.snapshot_source,
+            editor.snapshot_version,
+        )),
+        _ => None,
+    }
+}
+
+pub fn theme_editor_select(state: &mut AppState, selected: usize) {
+    let colors = state.theme.colors;
+    let Some(Modal::ThemeEditor(editor)) = &mut state.modal else {
+        return;
+    };
+    let selected = selected.min(COLOR_FIELDS.len().saturating_sub(1));
+    editor.selected = selected;
+    if selected < editor.scroll {
+        editor.scroll = selected;
+    }
+    if selected > editor.scroll + 12 {
+        editor.scroll = selected.saturating_sub(12);
+    }
+    if !editor.editing_hex {
+        editor.hex_draft = color_to_hex(
+            colors
+                .get(COLOR_FIELDS[selected].key)
+                .unwrap_or(ratatui::style::Color::Black),
+        );
+    }
+}
+
+pub fn theme_editor_nudge(state: &mut AppState, delta: i16) {
+    let Some((key, channel)) = theme_editor_key_channel(state) else {
+        return;
+    };
+    let current = state
+        .theme
+        .colors
+        .get(&key)
+        .unwrap_or(ratatui::style::Color::Black);
+    let next = nudge_channel(current, channel, delta);
+    let mut colors = state.theme.colors;
+    colors.set(&key, next);
+    apply_theme_colors(state, colors);
+    if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
+        editor.hex_draft = color_to_hex(next);
+        editor.editing_hex = false;
+    }
+}
+
+fn theme_editor_key_channel(state: &AppState) -> Option<(String, usize)> {
+    match &state.modal {
+        Some(Modal::ThemeEditor(editor)) => {
+            Some((editor.selected_key().to_string(), editor.channel))
+        }
+        _ => None,
+    }
+}
+
+pub fn theme_editor_commit_hex(state: &mut AppState) -> Result<()> {
+    let Some((key, draft)) = theme_editor_key_draft(state) else {
+        return Ok(());
+    };
+    let color = parse_hex_input(&draft)?;
+    let mut colors = state.theme.colors;
+    colors.set(&key, color);
+    apply_theme_colors(state, colors);
+    if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
+        editor.hex_draft = color_to_hex(color);
+        editor.editing_hex = false;
+    }
+    Ok(())
+}
+
+fn theme_editor_key_draft(state: &AppState) -> Option<(String, String)> {
+    match &state.modal {
+        Some(Modal::ThemeEditor(editor)) => {
+            Some((editor.selected_key().to_string(), editor.hex_draft.clone()))
+        }
+        _ => None,
+    }
+}
+
+pub fn theme_editor_reset(state: &mut AppState) {
+    let quotes = state.theme.header_quotes.clone();
+    let source = state.theme.source;
+    let version = state.theme.version;
+    state.theme = Theme::from_colors(ThemeColors::default(), source, version);
+    state.theme.header_quotes = quotes;
+    if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
+        editor.hex_draft = color_to_hex(
+            state
+                .theme
+                .colors
+                .get(editor.selected_key())
+                .unwrap_or(ratatui::style::Color::Black),
+        );
+        editor.editing_hex = false;
+    }
+}
+
+pub fn save_theme_editor(state: &mut AppState) -> Result<()> {
+    let Some(target) = theme_editor_save_target(state) else {
+        return Ok(());
+    };
+    let local_path = local_theme_path(&state.project_root);
+    let path = save_theme(
+        &state.theme,
+        &state.project_root,
+        target,
+        default_config_home().as_deref(),
+    )?;
+    let source = match target {
+        ThemeSaveTarget::Local => ThemeSource::Local,
+        ThemeSaveTarget::Global => ThemeSource::Global,
+    };
+    state.theme.source = source;
+    state.theme_status = ThemeStatus::healthy(source, state.theme.version);
+    if target == ThemeSaveTarget::Global && local_path.exists() {
+        state.show_toast(
+            ToastLevel::Warning,
+            format!(
+                "Saved global {}; local {} still overrides it",
+                path.display(),
+                local_path.display()
+            ),
+        );
+    } else {
+        state.show_toast(
+            ToastLevel::Success,
+            format!("Saved {} theme to {}", target.label(), path.display()),
+        );
+    }
+    state.modal = None;
+    Ok(())
+}
+
+fn theme_editor_save_target(state: &AppState) -> Option<ThemeSaveTarget> {
+    match &state.modal {
+        Some(Modal::ThemeEditor(editor)) => Some(editor.save_target),
+        _ => None,
     }
 }
 

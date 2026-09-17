@@ -1,4 +1,5 @@
 use crate::domain::{AppState, BulkAction, Conflict, DoctorSeverity, Modal};
+use crate::theme::{COLOR_FIELDS, ThemeEditorRow, color_rgb, color_to_hex, theme_editor_rows};
 use crate::ui::centered_rect;
 use ratatui::{
     Frame,
@@ -34,7 +35,11 @@ fn preview_overwrite_counts(lines: &[String]) -> (usize, usize, usize) {
 }
 
 pub(crate) fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let modal_area = centered_rect(70, 60, area);
+    let modal_area = if matches!(state.modal, Some(Modal::ThemeEditor(_))) {
+        centered_rect(80, 80, area)
+    } else {
+        centered_rect(70, 60, area)
+    };
     state.pointer.current_modal_area = Some(modal_area);
     f.render_widget(Clear, modal_area);
 
@@ -214,6 +219,7 @@ q / Q        Quit\n\
 Esc          Close modal / clear filter / clear selection (does not quit)\n\
 F1           Toggle help\n\
 F2           Toggle credits\n\
+C            Theme editor (live preview; Tab local/global; Y save)\n\
 j/k or ↑/↓   Navigate\n\
 Space        Toggle selection (file/folder)\n\
 Enter        Edit destination (file/folder)\n\
@@ -271,6 +277,7 @@ Tree: proper connectors (├ └ │) + counts + subtree badges (●) for densit
 Theme source: {}\n\
 Theme status: {}\n\
 \n\
+C opens the theme editor (default save: global).\n\
 Press Esc/F2 to close.",
                     state.theme.source.label(),
                     state.theme_status.message
@@ -419,6 +426,80 @@ Press Esc/F2 to close.",
                         .title(format!("Doctor ({})", findings.len()))
                         .borders(Borders::ALL)
                         .border_style(state.theme.active_border)
+                        .style(state.theme.modal),
+                );
+                f.render_widget(text, modal_area);
+            }
+            Modal::ThemeEditor(editor) => {
+                let rows = theme_editor_rows();
+                let channel = ["R", "G", "B"][editor.channel.min(2)];
+                let target = editor.save_target.label().to_uppercase();
+                let mut lines: Vec<Line<'_>> = vec![
+                    Line::from(format!(
+                        "Save: {target} (Tab)   Channel: {channel} ([/])   Y save   R reset   Esc revert"
+                    )),
+                    Line::from(if editor.editing_hex {
+                        format!("Hex: {}█   Enter apply   Esc cancel edit", editor.hex_draft)
+                    } else {
+                        format!(
+                            "Hex: {}   Enter to type   +/- or h/l nudge",
+                            editor.hex_draft
+                        )
+                    }),
+                    Line::from(""),
+                ];
+                let view_h = modal_area.height.saturating_sub(6) as usize;
+                let start = rows
+                    .iter()
+                    .position(|row| match row {
+                        ThemeEditorRow::Color(idx) => *idx >= editor.scroll,
+                        ThemeEditorRow::Header(_) => false,
+                    })
+                    .unwrap_or(0);
+                let start = if start > 0 && matches!(rows[start - 1], ThemeEditorRow::Header(_)) {
+                    start - 1
+                } else {
+                    start
+                };
+                for row in rows.iter().skip(start).take(view_h.max(1)) {
+                    match row {
+                        ThemeEditorRow::Header(name) => {
+                            lines.push(Line::from(Span::styled(
+                                format!(" {name}"),
+                                state.theme.modal_label,
+                            )));
+                        }
+                        ThemeEditorRow::Color(idx) => {
+                            let field = COLOR_FIELDS[*idx];
+                            let color = state
+                                .theme
+                                .colors
+                                .get(field.key)
+                                .unwrap_or(ratatui::style::Color::Black);
+                            let hex = color_to_hex(color);
+                            let (r, g, b) = color_rgb(color);
+                            let cursor = if *idx == editor.selected { ">" } else { " " };
+                            let style = if *idx == editor.selected {
+                                state.theme.selected
+                            } else {
+                                state.theme.modal_text
+                            };
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("{cursor} "), style),
+                                Span::styled("██ ", ratatui::style::Style::default().fg(color)),
+                                Span::styled(
+                                    format!("{:<22} {hex}  {r:3},{g:3},{b:3}", field.key),
+                                    style,
+                                ),
+                            ]));
+                        }
+                    }
+                }
+                let text = Paragraph::new(lines).block(
+                    Block::default()
+                        .title("Theme editor")
+                        .borders(Borders::ALL)
+                        .border_style(state.theme.input_border_focus)
                         .style(state.theme.modal),
                 );
                 f.render_widget(text, modal_area);

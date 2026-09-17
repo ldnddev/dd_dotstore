@@ -8,7 +8,7 @@ pub use health::*;
 pub use node::*;
 pub use persist::*;
 
-use crate::theme::{Theme, ThemeStatus};
+use crate::theme::{Theme, ThemeEditor, ThemeStatus};
 use crate::ui::toast::{Toast, ToastLevel};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, VecDeque};
@@ -59,6 +59,7 @@ pub enum Modal {
         selected: usize,
         scroll: usize,
     },
+    ThemeEditor(ThemeEditor),
 }
 
 #[derive(Clone, Debug)]

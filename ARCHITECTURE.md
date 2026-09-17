@@ -75,7 +75,7 @@ Centered modals (plan, overwrite, dest browser, ignore editor, help, credits, im
 - **NodeKind** — `File { dest }` | `Folder { children, expanded, dest }`.
 - **SymlinkStatus** — `None` | `Planned` (assigned dest `NotFound`) | `Valid` | `Broken` | `Unknown` (other metadata errors).
 - **Action** — `Create` / `Remove` / `Copy` / `RemoveCopy`.
-- **Modal** — `EditDest`, `Plan { action, scroll }`, `OverwriteWarning { conflicts, action_type, scroll }`, `IgnoreEditor { selected, draft }`, `Help`, `Credits`, `ImportPicker`, `ExportPicker`, `GroupEditor`, `Adopt`, `Doctor`.
+- **Modal** — `EditDest`, `Plan { action, scroll }`, `OverwriteWarning { conflicts, action_type, scroll }`, `IgnoreEditor { selected, draft }`, `Help`, `Credits`, `ImportPicker`, `ExportPicker`, `GroupEditor`, `Adopt`, `Doctor`, `ThemeEditor`.
 - **PointerState** — layout rects and mouse session flags. Persisted JSON does not mention `Rect`.
 - **Theme** — `serde_yaml` `ThemeFile`; lookup `./dd_dotstore_theme.yml` → `$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml` → built-in. `XDG_CONFIG_HOME` falls back to `$HOME/.config`. Schema `version: 1`, every color key, `#RRGGBB`.
 
@@ -99,6 +99,7 @@ Centered modals (plan, overwrite, dest browser, ignore editor, help, credits, im
 - `A`              → reverse-import HOME/XDG symlinks pointing at this project
 - `D`              → doctor (broken / planned / unknown / orphan)
 - `i` / `E`        → import / export
+- `C`              → theme editor (live preview; Tab local/global, default global; Y save; Esc revert)
 - `F1` / `F2`      → help / credits
 
 Click inside a confirm/overwrite/plan dialog is a no-op; click outside cancels. Use `Y` to apply.
