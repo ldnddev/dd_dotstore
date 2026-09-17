@@ -40,8 +40,9 @@ impl App {
             }
             Err(err) => {
                 state.theme = Theme::default();
-                state.theme_status =
-                    ThemeStatus::warning(format!("Theme warning: {err}; using built-in defaults"));
+                state.theme_status = ThemeStatus::warning(format!(
+                    "Theme warning: {err:#}; using built-in defaults"
+                ));
             }
         }
         state.header_copy = random_header_copy(&state.theme.header_quotes);

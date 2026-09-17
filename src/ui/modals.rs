@@ -1,5 +1,5 @@
 use crate::domain::{AppState, BulkAction, Conflict, DoctorSeverity, Modal};
-use crate::theme::{COLOR_FIELDS, ThemeEditorRow, color_rgb, color_to_hex, theme_editor_rows};
+use crate::theme::{ThemeEditorRow, color_from_rgb, color_rgb, color_to_hex, theme_editor_rows};
 use crate::ui::centered_rect;
 use ratatui::{
     Frame,
@@ -431,7 +431,7 @@ Press Esc/F2 to close.",
                 f.render_widget(text, modal_area);
             }
             Modal::ThemeEditor(editor) => {
-                let rows = theme_editor_rows();
+                let rows = theme_editor_rows(&editor.fields);
                 let channel = ["R", "G", "B"][editor.channel.min(2)];
                 let target = editor.save_target.label().to_uppercase();
                 let mut lines: Vec<Line<'_>> = vec![
@@ -470,11 +470,11 @@ Press Esc/F2 to close.",
                             )));
                         }
                         ThemeEditorRow::Color(idx) => {
-                            let field = COLOR_FIELDS[*idx];
-                            let color = state
-                                .theme
-                                .colors
+                            let field = editor.fields[*idx];
+                            let color = editor
+                                .palette
                                 .get(field.key)
+                                .map(color_from_rgb)
                                 .unwrap_or(ratatui::style::Color::Black);
                             let hex = color_to_hex(color);
                             let (r, g, b) = color_rgb(color);

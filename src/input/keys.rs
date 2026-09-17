@@ -2,16 +2,14 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::actions::{
-    action_targets, apply_adopt_candidates, apply_group_name, assign_destination,
-    collect_preview_lines, confirm_bulk, confirm_bulk_with_overwrite, export_to_path,
-    import_from_path, jump_to_doctor_source, open_adopt_picker, open_doctor, open_export_picker,
-    open_group_editor, open_import_picker, open_theme_editor, revert_theme_editor,
-    save_theme_editor, select_group_of_highlight, selected_create_conflicts,
-    theme_editor_commit_hex, theme_editor_nudge, theme_editor_reset, theme_editor_select,
-    undo_last,
+    action_targets, apply_adopt_candidates, apply_group_name, apply_live_theme_editor,
+    assign_destination, collect_preview_lines, confirm_bulk, confirm_bulk_with_overwrite,
+    export_to_path, import_from_path, jump_to_doctor_source, open_adopt_picker, open_doctor,
+    open_export_picker, open_group_editor, open_import_picker, open_theme_editor,
+    save_theme_editor, select_group_of_highlight, selected_create_conflicts, undo_last,
 };
 use crate::domain::{AppState, BrowserState, BulkAction, Modal, Node, NodeKind};
-use crate::theme::COLOR_FIELDS;
+use crate::theme::{EditorKey, EditorOutcome};
 use crate::tree::{
     AssignmentSource, find_mut_node, flatten_visible, rebuild_tree, toggle_expand, toggle_selected,
 };
@@ -719,125 +717,48 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
 }
 
 fn handle_theme_editor_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
-    let Some((selected, editing_hex)) = theme_editor_nav(state) else {
+    let Some(ek) = map_editor_key(key) else {
         return Ok(false);
     };
-    let last = COLOR_FIELDS.len().saturating_sub(1);
-
-    if editing_hex {
-        match key.code {
-            KeyCode::Esc => {
-                if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-                    editor.editing_hex = false;
-                    editor.hex_draft = crate::theme::color_to_hex(
-                        state
-                            .theme
-                            .colors
-                            .get(editor.selected_key())
-                            .unwrap_or(ratatui::style::Color::Black),
-                    );
-                }
-            }
-            KeyCode::Enter => {
-                if let Err(err) = theme_editor_commit_hex(state) {
-                    state.show_toast(ToastLevel::Error, format!("Invalid hex: {err}"));
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-                    let _ = editor.hex_draft.pop();
-                }
-            }
-            KeyCode::Char(c)
-                if key.modifiers.is_empty()
-                    && (c.is_ascii_hexdigit() || c == '#')
-                    && editor_draft_len(state) < 7 =>
-            {
-                if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-                    editor.hex_draft.push(c.to_ascii_uppercase());
-                }
-            }
-            _ => {}
-        }
-        return Ok(false);
-    }
-
-    match key.code {
-        KeyCode::Esc => {
-            revert_theme_editor(state);
-            state.modal = None;
-        }
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Char('s')
-            if key.modifiers.is_empty() =>
-        {
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+    let outcome = {
+        let Some(Modal::ThemeEditor(editor)) = &mut state.modal else {
+            return Ok(false);
+        };
+        editor.handle(ek, shift)
+    };
+    match outcome {
+        EditorOutcome::PaletteChanged => apply_live_theme_editor(state),
+        EditorOutcome::RequestSave => {
             if let Err(err) = save_theme_editor(state) {
                 state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
             }
         }
-        KeyCode::Char('R') => theme_editor_reset(state),
-        KeyCode::Tab => {
-            if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-                editor.save_target = editor.save_target.toggled();
-            }
+        EditorOutcome::Closed { .. } => {
+            apply_live_theme_editor(state);
+            state.modal = None;
         }
-        KeyCode::Enter => {
-            if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-                editor.editing_hex = true;
-            }
+        EditorOutcome::HexError(err) => {
+            state.show_toast(ToastLevel::Error, format!("Invalid hex: {err}"));
         }
-        KeyCode::Down | KeyCode::Char('j') => theme_editor_select(state, selected + 1),
-        KeyCode::Up | KeyCode::Char('k') => {
-            theme_editor_select(state, selected.saturating_sub(1));
-        }
-        KeyCode::Char('[') => {
-            if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-                editor.channel = editor.channel.saturating_sub(1);
-            }
-        }
-        KeyCode::Char(']') => {
-            if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-                editor.channel = (editor.channel + 1).min(2);
-            }
-        }
-        KeyCode::Char('+') | KeyCode::Char('=') => {
-            let step = if key.modifiers.contains(KeyModifiers::SHIFT) {
-                1
-            } else {
-                8
-            };
-            theme_editor_nudge(state, step);
-        }
-        KeyCode::Char('-') | KeyCode::Char('_') => {
-            let step = if key.modifiers.contains(KeyModifiers::SHIFT) {
-                -1
-            } else {
-                -8
-            };
-            theme_editor_nudge(state, step);
-        }
-        KeyCode::Char('h') | KeyCode::Left => theme_editor_nudge(state, -8),
-        KeyCode::Char('l') | KeyCode::Right => theme_editor_nudge(state, 8),
-        KeyCode::Char('G') => theme_editor_select(state, last),
-        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            theme_editor_select(state, 0);
-        }
-        _ => {}
+        EditorOutcome::None => {}
     }
     Ok(false)
 }
 
-fn theme_editor_nav(state: &AppState) -> Option<(usize, bool)> {
-    match &state.modal {
-        Some(Modal::ThemeEditor(editor)) => Some((editor.selected, editor.editing_hex)),
-        _ => None,
-    }
-}
-
-fn editor_draft_len(state: &AppState) -> usize {
-    match &state.modal {
-        Some(Modal::ThemeEditor(editor)) => editor.hex_draft.len(),
-        _ => 0,
-    }
+fn map_editor_key(key: KeyEvent) -> Option<EditorKey> {
+    Some(match key.code {
+        KeyCode::Up => EditorKey::Up,
+        KeyCode::Down => EditorKey::Down,
+        KeyCode::Left => EditorKey::Left,
+        KeyCode::Right => EditorKey::Right,
+        KeyCode::Tab => EditorKey::Tab,
+        KeyCode::Enter => EditorKey::Enter,
+        KeyCode::Esc => EditorKey::Esc,
+        KeyCode::Backspace => EditorKey::Backspace,
+        KeyCode::Char(c) => EditorKey::Char(c),
+        _ => return None,
+    })
 }
 
 pub(crate) fn selected_rel_path(state: &AppState, node_idx: usize) -> Option<PathBuf> {

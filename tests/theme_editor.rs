@@ -6,8 +6,8 @@ use dd_dotstore::app::App;
 use dd_dotstore::domain::Modal;
 use dd_dotstore::inputs::handle_key;
 use dd_dotstore::theme::{
-    COLOR_FIELDS, Theme, ThemeColors, ThemeSaveTarget, ThemeSource, color_to_hex, load_theme_with,
-    nudge_channel, parse_hex_input, render_theme_yaml, save_theme,
+    COLOR_FIELDS, Theme, ThemeColors, ThemeSaveTarget, ThemeSource, color_from_rgb, color_to_hex,
+    load_theme_with, nudge_channel, parse_hex_input, render_theme_yaml, save_theme,
 };
 use ratatui::style::Color;
 use std::fs;
@@ -33,11 +33,11 @@ fn color_field_list_covers_every_required_key() {
 #[test]
 fn parse_hex_input_accepts_hash_and_bare() {
     assert_eq!(
-        parse_hex_input("#AABBCC").expect("hash"),
+        color_from_rgb(parse_hex_input("#AABBCC").expect("hash")),
         Color::Rgb(0xaa, 0xbb, 0xcc)
     );
     assert_eq!(
-        parse_hex_input("aabbcc").expect("bare"),
+        color_from_rgb(parse_hex_input("aabbcc").expect("bare")),
         Color::Rgb(0xaa, 0xbb, 0xcc)
     );
     assert!(parse_hex_input("gg0000").is_err());

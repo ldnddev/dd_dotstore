@@ -153,7 +153,7 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
 
 # Specific release
 curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.5.0
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.6.0
 
 # Install somewhere else
 PREFIX=/usr/local curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \

@@ -524,7 +524,7 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                 let content_top = modal_area.y + 4;
                 if mouse.row >= content_top {
                     let rel = (mouse.row - content_top) as usize;
-                    let rows = crate::theme::theme_editor_rows();
+                    let rows = crate::theme::theme_editor_rows(&editor.fields);
                     let start = rows
                         .iter()
                         .position(|row| match row {
