@@ -17,6 +17,8 @@ Normative visual and interaction rules live in **`LDNDDEV_TUI_VISUAL_STANDARD.md
 ## Project Structure
 
 ```
+crates/
+└── ldnddev_theme/     # in-repo YAML theme load/save + live editor
 src/
 ├── main.rs              # CLI parser + TerminalGuard + event loop
 ├── lib.rs               # module exports; `inputs` / `state` / `toast` shims
@@ -77,7 +79,7 @@ Centered modals (plan, overwrite, dest browser, ignore editor, help, credits, im
 - **Action** — `Create` / `Remove` / `Copy` / `RemoveCopy`.
 - **Modal** — `EditDest`, `Plan { action, scroll }`, `OverwriteWarning { conflicts, action_type, scroll }`, `IgnoreEditor { selected, draft }`, `Help`, `Credits`, `ImportPicker`, `ExportPicker`, `GroupEditor`, `Adopt`, `Doctor`, `ThemeEditor`.
 - **PointerState** — layout rects and mouse session flags. Persisted JSON does not mention `Rect`.
-- **Theme** — shared crate `ldnddev_theme` (`../ldnddev_theme`) loads/saves YAML and owns the live editor. Lookup `./dd_dotstore_theme.yml` → `$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml` → built-in. Schema `version: 1`, every canonical color key, `#RRGGBB`. `C` opens the editor (global save default).
+- **Theme** — in-repo crate `crates/ldnddev_theme` loads/saves YAML and owns the live editor. Lookup `./dd_dotstore_theme.yml` → `$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml` → built-in. Schema `version: 1`, every canonical color key, `#RRGGBB`. `C` opens the editor (global save default).
 
 ## Key Bindings (main)
 

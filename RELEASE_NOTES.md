@@ -1,8 +1,12 @@
+## dd_dotstore v1.6.1
+
+Vendor `ldnddev_theme` at `crates/ldnddev_theme` so clones, CI, and `install.sh` compile without an external repo.
+
 ## dd_dotstore v1.6.0
 
 Shared `ldnddev_theme` crate.
 
-- Theme load/save and the live editor now come from `ldnddev_theme` (`../ldnddev_theme`), the same crate used by the other ldnddev TUIs.
+- Theme load/save and the live editor now come from `ldnddev_theme`.
 - Editor UX is unchanged (`C`, Tab local/global with global default, Y save, R reset, Esc revert).
 
 ## dd_dotstore v1.5.0
