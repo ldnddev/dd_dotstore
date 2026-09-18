@@ -481,14 +481,26 @@ fn esc_closes_common_modals() {
 }
 
 #[test]
-fn f2_opens_and_closes_credits_modal() {
+fn f2_toggles_theme_editor() {
+    let root = TempRoot::create("theme_f2");
+    fs::write(root.join(".xinitrc"), "exec awesome").expect("write dotfile");
+
+    let mut app = App::new_with_root(&root).expect("app init");
+    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("open theme");
+    assert!(matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
+    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("close theme");
+    assert!(app.state.modal.is_none());
+}
+
+#[test]
+fn f3_opens_and_closes_credits_modal() {
     let root = TempRoot::create("credits");
     fs::write(root.join(".xinitrc"), "exec awesome").expect("write dotfile");
 
     let mut app = App::new_with_root(&root).expect("app init");
-    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("open credits");
+    let _ = handle_key(&mut app.state, key(KeyCode::F(3))).expect("open credits");
     assert!(matches!(app.state.modal, Some(Modal::Credits)));
-    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("close credits");
+    let _ = handle_key(&mut app.state, key(KeyCode::F(3))).expect("close credits");
     assert!(app.state.modal.is_none());
 }
 

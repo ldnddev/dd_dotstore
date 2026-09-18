@@ -69,13 +69,13 @@ fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
 
 fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     // Width-adaptive key hints (footer reduced to 1 line; theme status moved out of persistent footer
-    // to reduce clutter — full details still in F2 Credits and at startup).
+    // to reduce clutter — full details still in F2 Theme / F3 Credits and at startup).
     let keys = if area.width < 75 {
         "F1:Help  q:Quit  j/k:Nav  Spc:Sel  s:Apply  x:Rem  /:Filter"
     } else if area.width < 110 {
         "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   q: Quit"
     } else {
-        "F1: Help   C: Theme   t: Group   A: Adopt   D: Doctor   s: Apply   q: Quit   (mouse: click/scroll/drag)"
+        "F1: Help   F2: Theme   t: Group   A: Adopt   D: Doctor   s: Apply   q: Quit   (mouse: click/scroll/drag)"
     };
 
     let bar = Paragraph::new(Line::from(keys))

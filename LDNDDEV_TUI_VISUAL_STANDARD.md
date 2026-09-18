@@ -22,7 +22,7 @@ All new ldnddev TUI apps (e.g. dd_dotstore, dd_ftp, etc.) **must** follow this s
 
 7. Port the header tagline randomization (supporting `header_quotes` override from theme) and width-adaptive key hints.
 
-8. Populate F1 Help with the full key + mouse reference, and F2 Credits with theme source/status.
+8. Populate F1 Help with the full key + mouse reference, and F2 Theme editor (source/status also in F3 Credits).
 
 9. Test on both narrow (<80 cols) and wide terminals; verify no overflow, good density, and consistent behavior.
 
@@ -137,7 +137,7 @@ header_quotes:
 ### Theme Status & Credits
 - Every app must expose the active theme source (`local` / `global` / `default`) and schema version.
 - Show theme health at startup (in footer or toast).
-- Full details must appear in the F2 Credits modal.
+- Full details must appear in the F2 Theme editor and F3 Credits modal.
 
 Validation checklist: local path, then XDG global, then built-in; every schema color key present as `#RRGGBB`; `version: 1`; no hardcoded colors after load. Anti-patterns: hardcoding colors in render paths, using one token for unrelated intents, missing focus-state mapping, inconsistent semantics between apps.
 
@@ -238,7 +238,8 @@ let keys = if area.width < 75 {
 - The full authoritative list of keys (including mouse) lives in the F1 Help modal.
 
 **Theme status / health** is **no longer shown persistently** in the footer (removed for declutter). It appears in:
-- F2 Credits modal
+- F2 Theme editor
+- F3 Credits modal
 - Startup (initial message or toast on warnings)
 
 ---
@@ -341,7 +342,8 @@ This pairing is what gives dd_dotstore its characteristic two-pane browser feel.
 ## 7. Common Shell Elements
 
 - **F1 Help modal**: Must contain the full key list + complete mouse documentation + any app-specific notes.
-- **F2 Credits modal**: Must show `Theme source: local/global/default` and the full `Theme status` message.
+- **F2 Theme editor**: Live color editor (Tab local/global, Y save, Esc/F2 revert). Same binding as other ldnddev TUIs.
+- **F3 Credits modal**: Must show `Theme source: local/global/default` and the full `Theme status` message.
 - **Toasts**: Use the four semantic colors (`success`, `warning`, `error`, `info`). Bottom-right, auto-dismiss after ~5s.
 - **Modals**: Centered, use `modal_background` + `modal_text` / `modal_labels`. Clear the background underneath.
 - **Input fields** (when present): Must use the full set of `input_*` tokens.

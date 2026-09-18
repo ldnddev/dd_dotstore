@@ -218,8 +218,8 @@ pub(crate) fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
 q / Q        Quit\n\
 Esc          Close modal / clear filter / clear selection (does not quit)\n\
 F1           Toggle help\n\
-F2           Toggle credits\n\
-C            Theme editor (live preview; Tab local/global; Y save)\n\
+F2           Theme editor (live preview; Tab local/global; Y save)\n\
+F3           Toggle credits\n\
 j/k or ↑/↓   Navigate\n\
 Space        Toggle selection (file/folder)\n\
 Enter        Edit destination (file/folder)\n\
@@ -277,8 +277,8 @@ Tree: proper connectors (├ └ │) + counts + subtree badges (●) for densit
 Theme source: {}\n\
 Theme status: {}\n\
 \n\
-C opens the theme editor (default save: global).\n\
-Press Esc/F2 to close.",
+F2 opens the theme editor (default save: global).\n\
+Press Esc/F3 to close.",
                     state.theme.source.label(),
                     state.theme_status.message
                 );
@@ -497,7 +497,7 @@ Press Esc/F2 to close.",
                 }
                 let text = Paragraph::new(lines).block(
                     Block::default()
-                        .title("Theme editor")
+                        .title("F2 Theme editor")
                         .borders(Borders::ALL)
                         .border_style(state.theme.input_border_focus)
                         .style(state.theme.modal),

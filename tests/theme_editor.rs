@@ -53,11 +53,11 @@ fn nudge_channel_clamps() {
 }
 
 #[test]
-fn c_opens_editor_with_global_save_default() {
+fn f2_opens_editor_with_global_save_default() {
     let root = TempRoot::create("theme_open");
     fs::write(root.join(".bashrc"), "x").expect("write");
     let mut app = App::new_with_root(&root).expect("app");
-    let _ = handle_key(&mut app.state, key(KeyCode::Char('C'))).expect("C");
+    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("F2");
     match &app.state.modal {
         Some(Modal::ThemeEditor(editor)) => {
             assert_eq!(editor.save_target, ThemeSaveTarget::Global);
@@ -73,7 +73,7 @@ fn tab_toggles_save_target_and_esc_reverts_colors() {
     fs::write(root.join(".bashrc"), "x").expect("write");
     let mut app = App::new_with_root(&root).expect("app");
     let original = app.state.theme.colors;
-    let _ = handle_key(&mut app.state, key(KeyCode::Char('C'))).expect("C");
+    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("F2");
     let _ = handle_key(&mut app.state, key(KeyCode::Tab)).expect("tab");
     match &app.state.modal {
         Some(Modal::ThemeEditor(editor)) => {
@@ -149,7 +149,7 @@ fn reset_restores_builtin_colors_without_closing() {
     let root = TempRoot::create("theme_reset");
     fs::write(root.join(".bashrc"), "x").expect("write");
     let mut app = App::new_with_root(&root).expect("app");
-    let _ = handle_key(&mut app.state, key(KeyCode::Char('C'))).expect("C");
+    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("F2");
     let _ = handle_key(&mut app.state, key(KeyCode::Char('l'))).expect("nudge");
     assert_ne!(
         app.state.theme.colors.base_background,

@@ -1,3 +1,7 @@
+## dd_dotstore v1.6.2
+
+Open the live theme editor with **F2**, matching the other ldnddev TUI apps. Credits moves to **F3**.
+
 ## dd_dotstore v1.6.1
 
 Vendor `ldnddev_theme` at `crates/ldnddev_theme` so clones, CI, and `install.sh` compile without an external repo.

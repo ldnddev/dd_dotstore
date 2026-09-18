@@ -6,7 +6,8 @@ use crate::actions::{
     assign_destination, collect_preview_lines, confirm_bulk, confirm_bulk_with_overwrite,
     export_to_path, import_from_path, jump_to_doctor_source, open_adopt_picker, open_doctor,
     open_export_picker, open_group_editor, open_import_picker, open_theme_editor,
-    save_theme_editor, select_group_of_highlight, selected_create_conflicts, undo_last,
+    revert_theme_editor, save_theme_editor, select_group_of_highlight, selected_create_conflicts,
+    undo_last,
 };
 use crate::domain::{AppState, BrowserState, BulkAction, Modal, Node, NodeKind};
 use crate::theme::{EditorKey, EditorOutcome};
@@ -17,6 +18,12 @@ use crate::ui::toast::ToastLevel;
 use std::path::PathBuf;
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
+    if matches!(state.modal, Some(Modal::ThemeEditor(_))) && key.code == KeyCode::F(2) {
+        revert_theme_editor(state);
+        state.modal = None;
+        return Ok(false);
+    }
+
     if state.modal.is_some() {
         return handle_modal_key(state, key);
     }
@@ -29,7 +36,8 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         KeyCode::F(1) => {
             state.modal = Some(Modal::Help);
         }
-        KeyCode::F(2) => {
+        KeyCode::F(2) => open_theme_editor(state),
+        KeyCode::F(3) => {
             state.modal = Some(Modal::Credits);
         }
         KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(true),
@@ -92,7 +100,6 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('T') => select_group_of_highlight(state),
         KeyCode::Char('A') => open_adopt_picker(state),
         KeyCode::Char('D') => open_doctor(state),
-        KeyCode::Char('C') => open_theme_editor(state),
 
         _ => {}
     }
@@ -521,12 +528,14 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             KeyCode::Esc | KeyCode::Enter | KeyCode::F(1) | KeyCode::Char('q') => {
                 state.modal = None;
             }
+            KeyCode::F(2) => open_theme_editor(state),
             _ => {}
         },
         Modal::Credits => match key.code {
-            KeyCode::Esc | KeyCode::Enter | KeyCode::F(2) | KeyCode::Char('q') => {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::F(3) | KeyCode::Char('q') => {
                 state.modal = None;
             }
+            KeyCode::F(2) => open_theme_editor(state),
             _ => {}
         },
 

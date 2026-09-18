@@ -25,15 +25,15 @@ TUI tool to manage Linux dotfiles: select project folder, assign destinations, c
 - Doctor (`D`): broken/drifted dests, planned-but-missing dests, and orphan project symlinks not in config
 - Unified plan dialog + overwrite warnings (every real DIR named)
 - Passive info/error notices appear as bottom-right toasts for 5 seconds
-- Help (`F1`) and credits (`F2`) modals
+- Help (`F1`), theme editor (`F2`), and credits (`F3`) modals
 
 ## Keybindings
 **Main keys**
 q / Q           Quit
 Esc             Close modal / clear filter / clear selection (does not quit)
 F1              Help modal
-F2              Credits modal
-C               Theme editor (Tab local/global save, Y write, R reset, Esc revert)
+F2              Theme editor (Tab local/global save, Y write, R reset, Esc revert)
+F3              Credits modal
 j / k / ↑ / ↓   Navigate list
 Space           Toggle selection (file/folder)
 Enter           Edit destination (file/folder)
@@ -125,7 +125,7 @@ At startup, the footer shows theme health/status, including the active source an
 
 The credits modal shows the active theme source as `local`, `global`, or `default`.
 
-`C` opens a live theme editor. `Tab` switches the save target (`global` is the default: `$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml`; `local` writes `./dd_dotstore_theme.yml`). `Y` writes the YAML; `Esc` reverts unsaved edits. If a local file exists it still wins lookup, even after a global save.
+`F2` opens a live theme editor. `Tab` switches the save target (`global` is the default: `$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml`; `local` writes `./dd_dotstore_theme.yml`). `Y` writes the YAML; `Esc` or `F2` reverts unsaved edits and closes. If a local file exists it still wins lookup, even after a global save.
 
 ## Visual Design Standard
 
@@ -153,7 +153,7 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
 
 # Specific release
 curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.6.1
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.6.2
 
 # Install somewhere else
 PREFIX=/usr/local curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
