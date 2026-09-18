@@ -54,3 +54,6 @@ Thumbs.db
 
 /target
 /.codex
+
+# Intermediate TUI frames; PNGs in docs/images/ are the committed artifacts.
+docs/images/_frames/

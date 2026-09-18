@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dd_dotstore tutorial — setup, install, and use</title>
+  <meta name="description" content="Illustrated guide to installing, launching, and using dd_dotstore, the TUI for managing Linux dotfile symlinks and copies.">
+  <link rel="canonical" href="https://ldnddev.github.io/dd_dotstore/">
+  <meta name="theme-color" content="#0F1114">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://ldnddev.github.io/dd_dotstore/">
+  <meta property="og:title" content="dd_dotstore tutorial">
+  <meta property="og:description" content="Illustrated guide to installing, launching, and using dd_dotstore.">
+  <meta property="og:image" content="https://ldnddev.github.io/dd_dotstore/images/01-main.png">
+  <style>
+    :root {
+      --bg: #0f1114;
+      --bg-raised: #1c1e21;
+      --bg-body: #2a2d31;
+      --text: #f5f6f7;
+      --muted: #9ea3aa;
+      --label: #ffaf46;
+      --focus: #64b4f5;
+      --link: #ffa087;
+      --ok: #82e0aa;
+      --warn: #f5c469;
+      --err: #e57373;
+      --info: #5dade2;
+      --border: #3a3e44;
+      --max: 72rem;
+      --sidebar: 16rem;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font: 17px/1.55 "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    a { color: var(--focus); }
+    a:hover { color: var(--link); }
+    a:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .skip {
+      position: absolute;
+      left: -999px;
+      top: 0;
+      background: var(--focus);
+      color: var(--bg);
+      padding: 0.5rem 1rem;
+      z-index: 10;
+    }
+    .skip:focus { left: 0.5rem; top: 0.5rem; }
+    .layout {
+      display: grid;
+      grid-template-columns: var(--sidebar) minmax(0, 1fr);
+      max-width: calc(var(--max) + var(--sidebar));
+      margin: 0 auto;
+    }
+    nav.toc {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 1.5rem 1rem 2rem 1.25rem;
+      border-right: 1px solid var(--border);
+      background: var(--bg);
+    }
+    nav.toc .brand {
+      font-size: 0.95rem;
+      letter-spacing: 0.02em;
+      color: var(--label);
+      margin: 0 0 1rem;
+      font-weight: 700;
+    }
+    nav.toc ol {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    nav.toc a {
+      display: block;
+      color: var(--muted);
+      text-decoration: none;
+      padding: 0.28rem 0.4rem;
+      border-radius: 6px;
+      font-size: 0.92rem;
+    }
+    nav.toc a:hover,
+    nav.toc a:focus-visible { color: var(--text); background: var(--bg-raised); }
+    main { padding: 2rem 1.5rem 4rem; min-width: 0; }
+    header.hero h1 {
+      font-size: clamp(1.8rem, 3vw, 2.4rem);
+      margin: 0 0 0.4rem;
+    }
+    header.hero p.lede {
+      color: var(--muted);
+      font-size: 1.1rem;
+      max-width: 46rem;
+    }
+    h2 {
+      margin-top: 2.75rem;
+      padding-top: 0.4rem;
+      border-top: 1px solid var(--border);
+      color: var(--focus);
+      font-size: 1.45rem;
+    }
+    h2:first-of-type { border-top: 0; }
+    h3 { margin-top: 1.6rem; color: var(--label); font-size: 1.12rem; }
+    p, li { max-width: 46rem; }
+    kbd {
+      font: 0.85em/1 ui-monospace, "JetBrains Mono", monospace;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 0.05em 0.4em;
+      color: var(--text);
+    }
+    pre, code {
+      font-family: ui-monospace, "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+    }
+    code {
+      font-size: 0.9em;
+      background: var(--bg-raised);
+      padding: 0.1em 0.35em;
+      border-radius: 4px;
+    }
+    pre {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      overflow: auto;
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    pre code { background: none; padding: 0; }
+    figure {
+      margin: 1.25rem 0 1.75rem;
+      max-width: 100%;
+    }
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: #0b0d10;
+    }
+    figcaption {
+      color: var(--muted);
+      font-size: 0.92rem;
+      margin-top: 0.55rem;
+    }
+    .callout {
+      border-left: 3px solid var(--focus);
+      background: var(--bg-raised);
+      padding: 0.8rem 1rem;
+      border-radius: 0 8px 8px 0;
+      max-width: 46rem;
+    }
+    .callout.warn { border-left-color: var(--warn); }
+    .callout.ok { border-left-color: var(--ok); }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      max-width: 50rem;
+      font-size: 0.95rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.45rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th { color: var(--label); font-weight: 600; }
+    .status { font-family: ui-monospace, monospace; }
+    footer.page {
+      margin-top: 3rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      nav.toc {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 1rem;
+      }
+      nav.toc ol { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <div class="layout">
+    <nav class="toc" aria-label="Tutorial sections">
+      <p class="brand">dd_dotstore</p>
+      <ol>
+        <li><a href="#what">What it is</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="#first-run">First run</a></li>
+        <li><a href="#ui">The window</a></li>
+        <li><a href="#dests">Assign destinations</a></li>
+        <li><a href="#apply">Apply, copy, undo</a></li>
+        <li><a href="#groups">Groups and filter</a></li>
+        <li><a href="#health">Adopt and doctor</a></li>
+        <li><a href="#theme">Theme and ignore</a></li>
+        <li><a href="#keys">Keys and mouse</a></li>
+        <li><a href="#config">Config files</a></li>
+        <li><a href="#uninstall">Uninstall</a></li>
+        <li><a href="#screenshots">Updating screenshots</a></li>
+      </ol>
+    </nav>
+    <main id="content">
+      <header class="hero">
+        <h1>dd_dotstore tutorial</h1>
+        <p class="lede">A terminal UI for mapping a dotfiles repo onto <code>$HOME</code> and XDG paths. This page walks through install, first launch, and the everyday loop: pick sources, assign destinations, apply as symlinks or copies.</p>
+      </header>
+
+      <section id="what">
+        <h2>What it is</h2>
+        <p>Point <strong>dd_dotstore</strong> at a project folder (a git repo of configs is the usual case). The left pane is that tree. The right pane is every destination you have assigned. You apply a plan to create symlinks (<span class="status">LINK</span>) or copies (<span class="status">COPY</span>), undo the last ten actions, and persist the map as <code>.dd_dotstore.json</code> in the project root.</p>
+        <figure>
+          <img src="images/01-main.png" width="2278" height="1468" alt="dd_dotstore main window. Source tree on the left with status icons, Destinations list on the right, footer key hints along the bottom.">
+          <figcaption>Main window. Dim arrows on unassigned rows are <em>smart dests</em> (XDG, <code>$HOME</code>, or a <code>.linked</code> fallback) until you apply.</figcaption>
+        </figure>
+        <p>Status icons on each source row:</p>
+        <table>
+          <thead><tr><th>Icon</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="status">✓</td><td>Destination exists and matches (valid symlink or copy)</td></tr>
+            <tr><td class="status">○</td><td>Assigned dest is not on disk yet (planned)</td></tr>
+            <tr><td class="status">✗</td><td>Broken or drifted dest</td></tr>
+            <tr><td class="status">?</td><td>Could not read dest metadata</td></tr>
+            <tr><td class="status">◌ / ●</td><td>Folder is not linked itself, but a descendant is configured</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="install">
+        <h2>Install</h2>
+        <h3>From GitHub Releases (recommended)</h3>
+        <p>The installer detects Linux <code>x86_64</code> or <code>aarch64</code>, downloads the matching musl package, puts the binary in <code>~/.local/bin</code>, and copies the theme to <code>~/.config/ldnddev/dd_dotstore_theme.yml</code>. Pipe to <code>bash</code>, not <code>sh</code>.</p>
+        <p>This repository is private, so anonymous GitHub URLs 404. Use a token from <code>gh auth login</code>:</p>
+        <pre><code>export GITHUB_TOKEN="$(gh auth token)"
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
+
+# Specific release
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.6.2
+
+# Install prefix
+PREFIX=/usr/local curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
+
+dd_dotstore --help</code></pre>
+        <p>If the repo is public, the unauthenticated form works:</p>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash</code></pre>
+        <div class="callout">
+          <p>If no prebuilt package exists for your machine, the script clones the repo and builds with Cargo (Rust <strong>1.85+</strong>). It warns if the target bin directory is not on <code>PATH</code>.</p>
+        </div>
+
+        <h3>From a source checkout</h3>
+        <pre><code>./install.sh                  # release build → ~/.local/bin + theme
+./install.sh --from-release   # GitHub package even from a checkout
+./install.sh --debug          # cargo build without --release
+XDG_CONFIG_HOME="$HOME/.config" ./install.sh</code></pre>
+
+        <h3>Development run (no install)</h3>
+        <pre><code>cargo run
+cargo run -- --root /path/to/dotfiles
+cargo run -- /path/to/dotfiles
+cargo run -- --help
+cargo run -- --version</code></pre>
+      </section>
+
+      <section id="first-run">
+        <h2>First run</h2>
+        <p>Launch inside your dotfiles repo, or pass the project root:</p>
+        <pre><code>cd ~/dotfiles
+dd_dotstore
+
+# or from anywhere
+dd_dotstore --root ~/dotfiles
+dd_dotstore ~/dotfiles</code></pre>
+        <p>The current directory is the project root unless you override it. Config is written as <code>.dd_dotstore.json</code> next to that root. <kbd>q</kbd> quits. <kbd>Esc</kbd> never quits — it closes a modal, then clears the filter, then clears checkboxes.</p>
+        <figure>
+          <img src="images/02-help.png" width="2278" height="1468" alt="Help modal listing keyboard and mouse bindings.">
+          <figcaption>Press <kbd>F1</kbd> any time for the in-app help. <kbd>F3</kbd> is credits and theme health.</figcaption>
+        </figure>
+      </section>
+
+      <section id="ui">
+        <h2>The window</h2>
+        <ul>
+          <li><strong>Header</strong> — app name plus a rotating tagline from the theme.</li>
+          <li><strong>Source</strong> — project tree with checkbox, status, <span class="status">[LINK]</span>/<span class="status">[COPY]</span>, name, optional group, optional dim dest.</li>
+          <li><strong>Destinations</strong> — assigned mappings only. Click a row to jump to it in the source tree.</li>
+          <li><strong>Footer</strong> — width-adaptive key hints.</li>
+          <li><strong>Toasts</strong> — passive notices, bottom-right, five seconds (click to dismiss).</li>
+        </ul>
+        <p>Navigate with <kbd>j</kbd>/<kbd>k</kbd> or arrows. <kbd>h</kbd>/<kbd>l</kbd> (or left/right) collapse and expand folders. <kbd>r</kbd> reloads the tree (dests and modes survive; expand state resets).</p>
+      </section>
+
+      <section id="dests">
+        <h2>Assign destinations</h2>
+        <p>Highlight a file or folder and press <kbd>Enter</kbd> or <kbd>e</kbd>. The destination browser starts at <code>$HOME</code>. Type to fuzzy-filter, <kbd>~</kbd> jumps home, <kbd>g</kbd>/<kbd>G</kbd> jump ends of the list, <kbd>Ctrl+S</kbd> selects the current directory as the dest.</p>
+        <figure>
+          <img src="images/04-dest-browser.png" width="2278" height="1468" alt="Destination browser modal listing home directories such as .config, Documents, and .zshrc.">
+          <figcaption>Filesystem picker. Double-click a name to enter a directory or pick a file; <kbd>Esc</kbd> cancels.</figcaption>
+        </figure>
+        <p>You do not have to pick a dest before apply. Unassigned rows already show a dim default:</p>
+        <ul>
+          <li><code>.config/nvim</code> → <code>$XDG_CONFIG_HOME/nvim</code> (usually <code>~/.config/nvim</code>)</li>
+          <li>A top-level folder like <code>nvim/</code> → <code>~/.config/nvim</code></li>
+          <li>A top-level file like <code>.zshrc</code> → <code>~/.zshrc</code></li>
+          <li>Anything nested that does not match those rules → <code>project/.linked/&lt;path&gt;</code>, labeled <code>[fallback: .linked]</code> in the plan. <code>.linked</code> is ignored as a source.</li>
+        </ul>
+      </section>
+
+      <section id="apply">
+        <h2>Apply, copy, undo</h2>
+        <p>Highlight is enough. Checkboxes, if any, win over the highlight. <kbd>s</kbd> or <kbd>p</kbd> opens the same Plan dialog. <kbd>Y</kbd> applies; any other key cancels.</p>
+        <figure>
+          <img src="images/05-plan.png" width="2278" height="1468" alt="Plan: Apply modal previewing LINK .config/nvim to /tmp/dd-home/.config/nvim.">
+          <figcaption>Plan preview. <span class="status">-&gt;</span> is a symlink, <span class="status">=&gt;</span> is a copy. Group names appear in brackets.</figcaption>
+        </figure>
+        <p><kbd>m</kbd> toggles LINK/COPY on the highlighted row. <kbd>M</kbd> sets every checked item to the next mode. Copies are for files you do not want as a live symlink (a script you will edit in place, a binary, and so on).</p>
+        <figure>
+          <img src="images/14-copy-mode.png" width="2278" height="1468" alt="Source row scripts/bootstrap.sh highlighted with [COPY] mode. README.md is also COPY.">
+          <figcaption><span class="status">[COPY]</span> uses a warning color so mixed batches are obvious before you apply.</figcaption>
+        </figure>
+        <p>If a destination is a real file or directory (not already your symlink), apply opens an overwrite warning. Directories named in that list will be deleted with <code>remove_dir_all</code>.</p>
+        <figure>
+          <img src="images/06-overwrite.png" width="2278" height="1468" alt="Overwrite warning modal with a red border, listing FILE /tmp/dd-home/.gitconfig.">
+          <figcaption>Confirm with <kbd>Y</kbd>. Clicking inside this dialog does nothing — keys only.</figcaption>
+        </figure>
+        <p><kbd>x</kbd> plans a remove. It never guesses a dest: only assigned destinations are removed. <kbd>u</kbd> undoes the last action (cap 10, persisted).</p>
+      </section>
+
+      <section id="groups">
+        <h2>Groups and filter</h2>
+        <p><kbd>t</kbd> sets a group name on the highlight or on every checked item (empty name clears). <kbd>T</kbd> checks every item that shares the highlight’s group, so a package like <code>nvim</code> or <code>shell</code> applies in one plan.</p>
+        <figure>
+          <img src="images/11-group.png" width="2278" height="1468" alt="Group editor modal showing Items: 1 and Group: shell with a cursor.">
+          <figcaption>Group names persist in <code>.dd_dotstore.json</code> and show as <code>·shell</code> on the source row.</figcaption>
+        </figure>
+        <figure>
+          <img src="images/13-selected.png" width="2278" height="1468" alt="Two shell-group items checked, source title showing 2 selected / 17, and a toast Selected 2 item(s) in group shell.">
+          <figcaption><kbd>T</kbd> on <code>.zshrc</code> selected both <code>shell</code> items. The toast is informational and disappears after five seconds.</figcaption>
+        </figure>
+        <p><kbd>/</kbd> focuses an inline filter in the Source title. It does not clear an existing query. Nested matches auto-expand; unmatched folders hide. The filter also matches group names. <kbd>Esc</kbd> while editing restores the previous query.</p>
+        <figure>
+          <img src="images/03-filter.png" width="2278" height="1468" alt="Source title showing filter: nvim with a cursor, only .config and nvim rows visible.">
+          <figcaption>Filter <code>nvim</code> keeps the folder path so you still see where the match lives.</figcaption>
+        </figure>
+      </section>
+
+      <section id="health">
+        <h2>Adopt and doctor</h2>
+        <p>If you already linked files by hand, <kbd>A</kbd> scans <code>$HOME</code> and XDG for symlinks that point into this project and are missing from the map. Space toggles, <kbd>a</kbd> selects all, <kbd>Y</kbd> adopts.</p>
+        <figure>
+          <img src="images/12-adopt.png" width="2278" height="1468" alt="Adopt project symlinks modal listing .bashrc and .config/starship.toml with checkboxes checked.">
+          <figcaption>Reverse import. Adopted items become LINK dests; you still apply if you need to recreate a missing link.</figcaption>
+        </figure>
+        <p><kbd>D</kbd> opens Doctor: broken/drifted dests, planned-but-missing dests, unknown metadata, and orphan project symlinks not in config. <kbd>Enter</kbd> jumps to the source row; <kbd>A</kbd> from Doctor adopts orphans.</p>
+        <figure>
+          <img src="images/09-doctor.png" width="2278" height="1468" alt="Doctor modal with CRIT broken .gitconfig, WARN planned nvim dest, and INFO orphan .bashrc and starship.toml.">
+          <figcaption>Crit / warn / info. Fix broken dests with <kbd>x</kbd> then re-apply, or adopt orphans so they join the map.</figcaption>
+        </figure>
+      </section>
+
+      <section id="theme">
+        <h2>Theme and ignore</h2>
+        <p>Theme lookup: <code>./dd_dotstore_theme.yml</code>, then <code>$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml</code>, then built-in defaults. Files must declare <code>version: 1</code> and every canonical color as <code>#RRGGBB</code>. A bad file falls back to built-in and warns; <kbd>F3</kbd> shows the active source (<code>local</code> / <code>global</code> / <code>default</code>).</p>
+        <figure>
+          <img src="images/10-credits.png" width="2278" height="1468" alt="Credits modal showing theme source local and Theme OK local schema v1.">
+          <figcaption>Credits is also the theme health readout.</figcaption>
+        </figure>
+        <p><kbd>F2</kbd> is a live editor. <kbd>Tab</kbd> switches save target (global is the default). <kbd>Y</kbd> writes YAML, <kbd>R</kbd> resets colors, <kbd>Esc</kbd> reverts unsaved edits. A local file still wins lookup after a global save.</p>
+        <figure>
+          <img src="images/07-theme.png" width="2278" height="1468" alt="F2 theme editor listing Surfaces, Text, Chrome, and Inputs color tokens with swatches and hex values.">
+          <figcaption>Nudge RGB with <kbd>+/-</kbd> or <kbd>h</kbd>/<kbd>l</kbd>, <kbd>[</kbd>/<kbd>]</kbd> for channel, <kbd>Enter</kbd> to type hex.</figcaption>
+        </figure>
+        <p><kbd>I</kbd> edits ignore patterns (list / add / delete). Defaults hide <code>.git</code>, <code>node_modules</code>, <code>target</code>, <code>__pycache__</code>, <code>.dd_dotstore.json</code>, <code>.DS_Store</code>, and <code>.linked</code>. An empty list disables those defaults.</p>
+        <figure>
+          <img src="images/08-ignore.png" width="2278" height="1468" alt="Ignore editor listing default patterns with an Add field and cursor.">
+          <figcaption>Patterns persist in the project JSON. Import copies ignores only when the key is present in the file.</figcaption>
+        </figure>
+      </section>
+
+      <section id="keys">
+        <h2>Keys and mouse</h2>
+        <h3>Main</h3>
+        <table>
+          <thead><tr><th>Key</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>q</kbd> / <kbd>Q</kbd></td><td>Quit</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Close modal / clear filter / clear selection (does not quit)</td></tr>
+            <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Help / theme editor / credits</td></tr>
+            <tr><td><kbd>j</kbd> <kbd>k</kbd> arrows</td><td>Move</td></tr>
+            <tr><td><kbd>Space</kbd></td><td>Toggle checkbox</td></tr>
+            <tr><td><kbd>Enter</kbd> / <kbd>e</kbd></td><td>Edit destination</td></tr>
+            <tr><td><kbd>h</kbd> <kbd>l</kbd></td><td>Collapse / expand</td></tr>
+            <tr><td><kbd>s</kbd> / <kbd>p</kbd></td><td>Plan apply</td></tr>
+            <tr><td><kbd>x</kbd></td><td>Plan remove</td></tr>
+            <tr><td><kbd>m</kbd> / <kbd>M</kbd></td><td>LINK/COPY on highlight / on selection</td></tr>
+            <tr><td><kbd>t</kbd> / <kbd>T</kbd></td><td>Set group / select group</td></tr>
+            <tr><td><kbd>A</kbd> / <kbd>D</kbd></td><td>Adopt / doctor</td></tr>
+            <tr><td><kbd>u</kbd></td><td>Undo</td></tr>
+            <tr><td><kbd>/</kbd></td><td>Filter</td></tr>
+            <tr><td><kbd>I</kbd> <kbd>i</kbd> <kbd>E</kbd></td><td>Ignore / import / export</td></tr>
+          </tbody>
+        </table>
+        <h3>Mouse</h3>
+        <ul>
+          <li>Click a row to move the highlight; far-left click toggles the checkbox.</li>
+          <li>Click the tree connector on a folder to expand or collapse.</li>
+          <li>Shift-click range-selects from the current highlight.</li>
+          <li>Double-click the name to edit the destination.</li>
+          <li>Wheel scrolls the pane under the cursor (Shift = faster). Drag the scrollbar too.</li>
+          <li>Click a Destinations row to jump (ancestors expand as needed).</li>
+          <li>Click outside a modal to cancel. Confirm/overwrite/plan still require <kbd>Y</kbd>.</li>
+        </ul>
+        <p>Import/export live under <code>~/.dd_dotstore/exports/</code>. The import picker lists newest first.</p>
+      </section>
+
+      <section id="config">
+        <h2>Config files</h2>
+        <table>
+          <thead><tr><th>Path</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>.dd_dotstore.json</code></td><td>Per-project map: dests, modes, groups, ignores, undo history</td></tr>
+            <tr><td><code>./dd_dotstore_theme.yml</code></td><td>Local theme (wins lookup)</td></tr>
+            <tr><td><code>$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml</code></td><td>Global theme (installer default)</td></tr>
+            <tr><td><code>~/.dd_dotstore/exports/</code></td><td>Exported configs</td></tr>
+          </tbody>
+        </table>
+        <p>Requires a Unix-like OS (symlinks) and Rust 1.85+ if you build from source. Idle auto-save is 300&nbsp;ms after the last mutation; apply/undo/import/ignore flush immediately.</p>
+      </section>
+
+      <section id="uninstall">
+        <h2>Uninstall</h2>
+        <pre><code>export GITHUB_TOKEN="$(gh auth token)"
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --uninstall
+
+# From a source checkout
+./install.sh --uninstall</code></pre>
+        <p>Removes the installed binary and <code>~/.config/ldnddev/dd_dotstore_theme.yml</code>. The <code>ldnddev</code> directory is removed only if it is empty. Project <code>.dd_dotstore.json</code> files and your actual dotfiles are left alone.</p>
+      </section>
+
+      <section id="screenshots">
+        <h2>Updating screenshots</h2>
+        <p>Every PNG on this page is generated from the live TUI, not hand-drawn. When the UI changes, regenerate them:</p>
+        <pre><code>./docs/capture.sh</code></pre>
+        <p>That script:</p>
+        <ol>
+          <li>Builds a throwaway fixture under <code>/tmp/dd-dots</code> and <code>/tmp/dd-home</code> so dest paths stay short and your real <code>$HOME</code> is never scanned.</li>
+          <li>Drives <code>examples/tutorial_shots.rs</code> through each scene and writes HTML frames to <code>docs/images/_frames/</code> (gitignored).</li>
+          <li>Screenshots those frames with Playwright + Chromium into <code>docs/images/*.png</code>.</li>
+          <li>Fails if <code>docs/index.html</code> references a PNG that was not produced.</li>
+        </ol>
+        <p>To add a shot: append a <code>capture(...)</code> call in the example, document the id in <a href="https://github.com/ldnddev/dd_dotstore/blob/master/docs/README.md">docs/README.md</a>, reference <code>images/&lt;id&gt;.png</code> here, then re-run <code>./docs/capture.sh</code>.</p>
+        <div class="callout ok">
+          <p>Full capture notes — required tools, shot catalog, and how to change the fixture — live in <a href="https://github.com/ldnddev/dd_dotstore/blob/master/docs/README.md">docs/README.md</a>.</p>
+        </div>
+      </section>
+
+      <footer class="page">
+        <p>dd_dotstore v1.6.2 · MIT License · <a href="https://github.com/ldnddev/dd_dotstore">GitHub</a></p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
