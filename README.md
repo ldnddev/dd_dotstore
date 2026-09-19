@@ -42,8 +42,6 @@ Requires Rust 1.85+ (edition 2024) and a Unix-like OS (symlinks). Config is `.dd
 - Theme editor (`F2`), ignore editor, import/export
 - Keyboard and mouse; help is `F1`
 
-Visual contract: [`LDNDDEV_TUI_VISUAL_STANDARD.md`](LDNDDEV_TUI_VISUAL_STANDARD.md).
-
 ## License
 
 MIT

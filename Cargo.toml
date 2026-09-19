@@ -10,9 +10,16 @@ resolver = "2"
 
 [dependencies]
 anyhow = "1.0.102"
-crossterm = "0.29.0"
-ratatui = "0.30.0"
+crossterm = "0.29"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
 ldnddev_theme = { path = "crates/ldnddev_theme" }
+
+[profile.release]
+opt-level = "z" # smaller than "s" on this crate (~1014K vs ~1054K, x86_64 gnu)
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
