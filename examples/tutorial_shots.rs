@@ -18,9 +18,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_dotstore::app::App;
 use dd_dotstore::domain::NodeKind;
 use dd_dotstore::tree::flatten_visible;
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::{Color, Modifier};
-use ratatui::Terminal;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
@@ -267,9 +267,7 @@ fn expand_all(app: &mut App) {
     fn rec(nodes: &mut [dd_dotstore::domain::Node]) {
         for node in nodes {
             if let NodeKind::Folder {
-                expanded,
-                children,
-                ..
+                expanded, children, ..
             } = &mut node.kind
             {
                 *expanded = true;
