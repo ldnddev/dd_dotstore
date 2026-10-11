@@ -175,6 +175,10 @@ pub struct PointerState {
     pub scrollbar_dragging: bool,
     pub last_mouse_click_pos: Option<(u16, u16, Instant)>,
     pub destination_paths: Vec<PathBuf>,
+    /// Source path whose saved destination was last scrolled into view.
+    /// Wheel-scrolling Destinations does not clear this, so the offset stays
+    /// put until the source cursor moves.
+    pub dest_follow_path: Option<PathBuf>,
 }
 
 #[derive(Default)]

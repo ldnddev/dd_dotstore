@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Git tag to build and publish (e.g. v1.6.2)"
+        description: "Git tag to build and publish (e.g. v1.6.3)"
         required: true
         type: string
 

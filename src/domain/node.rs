@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -56,6 +56,16 @@ pub struct Node {
     pub group: Option<String>,
     /// Display-only. Set from the live tree at flatten; not persisted.
     pub has_configured_descendant: bool,
+}
+
+impl Node {
+    /// Saved destination, if this row is in the map. `None` means the UI may
+    /// still show a suggested path from the XDG / `$HOME` / `.linked` rules.
+    pub fn assigned_dest(&self) -> Option<&Path> {
+        match &self.kind {
+            NodeKind::File { dest } | NodeKind::Folder { dest, .. } => dest.as_deref(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

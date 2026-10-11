@@ -121,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "dd_dotstore"
-version = "1.6.2"
+version = "1.6.3"
 dependencies = [
  "anyhow",
  "crossterm",
