@@ -37,18 +37,16 @@ jobs:
           else
             TAG="$REF_NAME"
           fi
-          case "$TAG" in
-            v[0-9]*.[0-9]*.[0-9]*) ;;
-            *)
-              echo "invalid tag: $TAG" >&2
-              exit 1
-              ;;
-          esac
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "invalid tag: $TAG" >&2
+            exit 1
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.meta.outputs.tag }}
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -104,11 +102,16 @@ jobs:
           else
             TAG="$REF_NAME"
           fi
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "invalid tag: $TAG" >&2
+            exit 1
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.meta.outputs.tag }}
+          persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:
