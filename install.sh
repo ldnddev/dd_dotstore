@@ -17,6 +17,9 @@ APP_NAME="dd_dotstore"
 THEME_FILE_NAME="dd_dotstore_theme.yml"
 THEME_DIR_NAME="ldnddev"
 MIN_RUST_VERSION="1.85.0"
+# Compressed archive cap, and per-file cap enforced again after extract.
+MAX_ARCHIVE_BYTES=20000000
+MAX_MEMBER_BYTES=30000000
 REPO="${REPO:-ldnddev/dd_dotstore}"
 GITHUB_BASE="${GITHUB_BASE:-https://github.com/${REPO}}"
 GITHUB_API="${GITHUB_API:-https://api.github.com/repos/${REPO}}"
@@ -69,6 +72,66 @@ USAGE
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
+}
+
+# Release tags, asset names, and repo owner/name. Rejects `..` so a tag cannot
+# retarget a download URL.
+token_ok() {
+  case "$1" in
+    '' | . | .. | *[!A-Za-z0-9._-]* | *..*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+validate_repo() {
+  case "$REPO" in
+    */*) ;;
+    *) fail "REPO must look like owner/name" ;;
+  esac
+  case "$REPO" in
+    */*/*) fail "REPO must look like owner/name" ;;
+  esac
+  token_ok "${REPO%%/*}" || fail "REPO must look like owner/name"
+  token_ok "${REPO#*/}" || fail "REPO must look like owner/name"
+}
+
+# Only the configured repo's GitHub release assets. The JSON parser must not
+# be able to send GITHUB_TOKEN or the download to another host.
+is_allowed_download_url() {
+  local url="$1"
+  local gh="https://github.com/${REPO}/releases/download/"
+  local api="https://api.github.com/repos/${REPO}/releases/assets/"
+  local rest tag name id
+
+  case "$url" in
+    *[!A-Za-z0-9:/._-]*)
+      return 1
+      ;;
+  esac
+  case "$url" in
+    "$gh"*)
+      rest="${url#"$gh"}"
+      tag="${rest%%/*}"
+      name="${rest#*/}"
+      [ "$tag" != "$rest" ] || return 1
+      case "$name" in
+        */*) return 1 ;;
+      esac
+      token_ok "$tag" || return 1
+      token_ok "$name" || return 1
+      return 0
+      ;;
+    "$api"*)
+      id="${url#"$api"}"
+      case "$id" in
+        '' | *[!0-9]*) return 1 ;;
+      esac
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 info() {
@@ -256,6 +319,7 @@ latest_release_tag() {
   }
   tag="$(printf '%s\n' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
   [ -n "$tag" ] || fail "could not parse the latest release tag for ${REPO}"
+  token_ok "$tag" || fail "invalid release tag from GitHub"
   printf '%s\n' "$tag"
 }
 
@@ -328,6 +392,9 @@ asset_name() {
 asset_url() {
   local tag="$1"
   local target="$2"
+  validate_repo
+  token_ok "$tag" || fail "invalid release tag"
+  token_ok "$target" || fail "invalid package target"
   printf '%s/releases/download/%s/%s\n' "$GITHUB_BASE" "$tag" "$(asset_name "$tag" "$target")"
 }
 
@@ -411,21 +478,69 @@ PATH_NOTE
   esac
 }
 
+validate_tarball_members() {
+  local archive="$1"
+  local list line
+  local saw_bin=0 saw_theme=0 count=0
+
+  list="$(tar -tzf "$archive")" || fail "could not read tarball"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    count=$((count + 1))
+    case "$line" in
+      "$APP_NAME" | "./$APP_NAME") saw_bin=1 ;;
+      "$THEME_FILE_NAME" | "./$THEME_FILE_NAME") saw_theme=1 ;;
+      *) fail "tarball member is not allowed: ${line}" ;;
+    esac
+  done <<< "$list"
+  [ "$count" -eq 2 ] || fail "tarball must contain exactly ${APP_NAME} and ${THEME_FILE_NAME}"
+  [ "$saw_bin" -eq 1 ] && [ "$saw_theme" -eq 1 ] || fail "tarball is missing required files"
+}
+
+assert_safe_member() {
+  local path="$1"
+  local label="$2"
+  local links size
+
+  if [ -L "$path" ]; then
+    fail "refusing symlink in tarball: ${label}"
+  fi
+  if [ ! -f "$path" ]; then
+    fail "tarball member is not a regular file: ${label}"
+  fi
+  links="$(stat -c %h -- "$path")"
+  [ "$links" = "1" ] || fail "refusing hard link in tarball: ${label}"
+  size="$(stat -c %s -- "$path")"
+  [ "$size" -le "$MAX_MEMBER_BYTES" ] || fail "tarball member is too large: ${label}"
+}
+
+extract_tarball() {
+  local archive="$1"
+  local dest="$2"
+  local bytes blocks
+
+  bytes="$(stat -c %s -- "$archive")"
+  [ "$bytes" -le "$MAX_ARCHIVE_BYTES" ] || fail "tarball is too large"
+  validate_tarball_members "$archive"
+  mkdir -p "$dest"
+  # bash ulimit -f is 1024-byte blocks on Linux. Stop a gzip bomb while extracting.
+  blocks=$((MAX_MEMBER_BYTES / 1024))
+  (
+    ulimit -f "$blocks"
+    tar -xzf "$archive" -C "$dest"
+  ) || fail "failed to extract tarball"
+  assert_safe_member "$dest/$APP_NAME" "$APP_NAME"
+  assert_safe_member "$dest/$THEME_FILE_NAME" "$THEME_FILE_NAME"
+}
+
 unpack_tarball() {
   local archive="$1"
   local dest="$2"
 
   need_cmd tar
-  mkdir -p "$dest"
-  tar -xzf "$archive" -C "$dest"
-
-  local bin theme
-  bin="$(find "$dest" -type f -name "$APP_NAME" | head -n1)"
-  theme="$(find "$dest" -type f -name "$THEME_FILE_NAME" | head -n1)"
-  [ -n "$bin" ] || fail "tarball does not contain ${APP_NAME}"
-  [ -n "$theme" ] || fail "tarball does not contain ${THEME_FILE_NAME}"
-  chmod 0755 "$bin"
-  printf '%s\t%s\n' "$bin" "$theme"
+  need_cmd stat
+  extract_tarball "$archive" "$dest"
+  printf '%s\t%s\n' "$dest/$APP_NAME" "$dest/$THEME_FILE_NAME"
 }
 
 install_from_tarball() {
@@ -449,6 +564,10 @@ download_release_package() {
   local quiet="${3:-0}"
   local tmp archive sums url sums_url json name sums_name accept
 
+  validate_repo
+  token_ok "$tag" || fail "invalid release tag"
+  token_ok "$target" || fail "invalid package target"
+
   tmp="$(make_tempdir)"
   name="$(asset_name "$tag" "$target")"
   sums_name="${name}.sha256"
@@ -470,14 +589,15 @@ download_release_package() {
       sums_url="$(asset_api_url "$json" "$sums_name" browser_download_url || true)"
     fi
   fi
-  if [ -z "$url" ]; then
+  if [ -z "$url" ] || ! is_allowed_download_url "$url"; then
     url="$(asset_url "$tag" "$target")"
-    sums_url="$(checksum_url "$tag" "$target")"
     accept="*/*"
   fi
-  if [ -z "$sums_url" ]; then
+  if [ -z "$sums_url" ] || ! is_allowed_download_url "$sums_url"; then
     sums_url="$(checksum_url "$tag" "$target")"
   fi
+  is_allowed_download_url "$url" || fail "refusing unexpected release URL"
+  is_allowed_download_url "$sums_url" || fail "refusing unexpected checksum URL"
 
   if [ "$quiet" -eq 0 ]; then
     info "downloading ${name}"
@@ -591,7 +711,9 @@ clone_and_build() {
     fi
   fi
 
+  validate_repo
   if [ -n "$source_ref" ]; then
+    token_ok "$source_ref" || fail "invalid release tag"
     info "cloning ${GITHUB_BASE} (${source_ref})"
     if ! git clone --depth 1 --branch "$source_ref" "${GITHUB_BASE}.git" "$dest"; then
       warn "tag ${source_ref} not found; cloning default branch"
