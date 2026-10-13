@@ -28,8 +28,14 @@ pub fn build_tree(root: &Path, ignores: &[String]) -> Vec<Node> {
                 Ok(p) => p.to_path_buf(),
                 Err(_) => continue,
             };
+            // `DirEntry::file_type` follows symlinks when `d_type` is unknown.
+            // A directory link would otherwise walk out of the project.
+            let Ok(meta) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            let file_type = meta.file_type();
 
-            let kind = if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            let kind = if file_type.is_dir() && !file_type.is_symlink() {
                 NodeKind::Folder {
                     children: recurse(&path, root, ignores),
                     expanded: false,

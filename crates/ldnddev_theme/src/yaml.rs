@@ -1,11 +1,19 @@
 use crate::fields::{ColorField, COLOR_FIELDS};
 use crate::palette::{Palette, ThemeSource};
 use crate::rgb::{parse_hex_color, Rgb};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Theme files are small. A larger file is rejected before YAML parse so a
+/// cloned repo cannot feed the parser a nested bomb.
+const MAX_THEME_BYTES: u64 = 256 * 1024;
+const MAX_THEME_DEPTH: usize = 16;
+const MAX_THEME_INDENT: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParseMode {
@@ -22,6 +30,10 @@ struct RawThemeFile {
 }
 
 pub fn load_from_str(content: &str, mode: ParseMode, source: ThemeSource) -> Result<Palette> {
+    if content.len() > MAX_THEME_BYTES as usize {
+        bail!("theme YAML exceeds {MAX_THEME_BYTES} bytes");
+    }
+    validate_theme_yaml(content)?;
     let file: RawThemeFile = serde_yaml::from_str(content).context("Failed to parse theme YAML")?;
     let version = parse_version(&file.version)?;
     if version != crate::SUPPORTED_THEME_VERSION {
@@ -51,14 +63,24 @@ pub fn load_from_str(content: &str, mode: ParseMode, source: ThemeSource) -> Res
     for (key, rgb) in parsed {
         palette.set(&key, rgb);
     }
-    palette.header_quotes = file.header_quotes;
+    palette.header_quotes = file
+        .header_quotes
+        .into_iter()
+        .map(|quote| {
+            quote
+                .chars()
+                .filter(|c| !c.is_control())
+                .collect::<String>()
+        })
+        .filter(|quote| !quote.trim().is_empty())
+        .collect();
     palette.version = version;
     palette.source = source;
     Ok(palette)
 }
 
 pub fn load_from_file(path: &Path, mode: ParseMode, source: ThemeSource) -> Result<Palette> {
-    let content = fs::read_to_string(path)
+    let content = read_no_follow(path, MAX_THEME_BYTES)
         .with_context(|| format!("Failed to read theme file: {}", path.display()))?;
     load_from_str(&content, mode, source)
         .with_context(|| format!("Failed to parse theme file: {}", path.display()))
@@ -160,9 +182,162 @@ pub fn save_theme(
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create theme directory {}", parent.display()))?;
     }
-    fs::write(&path, render_yaml(palette, fields))
+    write_no_follow(&path, &render_yaml(palette, fields))
         .with_context(|| format!("Failed to write theme file {}", path.display()))?;
     Ok(path)
+}
+
+fn read_no_follow(path: &Path, max_bytes: u64) -> Result<String> {
+    let meta =
+        fs::symlink_metadata(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    if meta.file_type().is_symlink() {
+        bail!("refusing to follow symlink {}", path.display());
+    }
+    if !meta.is_file() {
+        bail!("refusing to read non-file {}", path.display());
+    }
+    if meta.len() > max_bytes {
+        bail!(
+            "{} is {} bytes; refusing to read more than {max_bytes}",
+            path.display(),
+            meta.len()
+        );
+    }
+    let file =
+        fs::File::open(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    let mut buf = String::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_string(&mut buf)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    if buf.len() as u64 > max_bytes {
+        bail!("{} exceeds {max_bytes} bytes", path.display());
+    }
+    Ok(buf)
+}
+
+fn write_no_follow(path: &Path, contents: &str) -> Result<()> {
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            bail!("refusing to follow symlink {}", path.display());
+        }
+        if !meta.is_file() {
+            bail!("refusing to overwrite non-file {}", path.display());
+        }
+    }
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("theme");
+    let tmp = parent.join(format!(".{file_name}.{}.{nanos}.tmp", std::process::id()));
+    let result = (|| -> Result<()> {
+        let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// Reject anchors, aliases, and deep documents before `serde_yaml` expands them.
+fn validate_theme_yaml(content: &str) -> Result<()> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let mut comment = false;
+    let mut prev_ws = true;
+    let mut depth = 0usize;
+    let mut chars = content.chars().peekable();
+    while let Some(c) = chars.next() {
+        if comment {
+            if c == '\n' {
+                comment = false;
+                prev_ws = true;
+            }
+            continue;
+        }
+        if in_single {
+            if c == '\'' {
+                if chars.peek() == Some(&'\'') {
+                    chars.next();
+                } else {
+                    in_single = false;
+                }
+            }
+            prev_ws = false;
+            continue;
+        }
+        if in_double {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if c == '\\' {
+                escaped = true;
+                continue;
+            }
+            if c == '"' {
+                in_double = false;
+            }
+            prev_ws = false;
+            continue;
+        }
+        match c {
+            '#' if prev_ws => comment = true,
+            '\'' => {
+                in_single = true;
+                prev_ws = false;
+            }
+            '"' => {
+                in_double = true;
+                prev_ws = false;
+            }
+            '\n' => prev_ws = true,
+            '&' | '*'
+                if chars
+                    .peek()
+                    .is_some_and(|next| next.is_ascii_alphanumeric() || *next == '_') =>
+            {
+                bail!("theme YAML anchors and aliases are not allowed");
+            }
+            '{' | '[' => {
+                depth += 1;
+                if depth > MAX_THEME_DEPTH {
+                    bail!("theme YAML is nested too deeply");
+                }
+                prev_ws = false;
+            }
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                prev_ws = false;
+            }
+            c if c.is_whitespace() => prev_ws = true,
+            _ => prev_ws = false,
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.chars().take_while(|c| *c == ' ').count();
+        if indent > MAX_THEME_INDENT {
+            bail!("theme YAML is nested too deeply");
+        }
+    }
+    Ok(())
 }
 
 fn parse_version(version: &Option<serde_yaml::Value>) -> Result<u64> {

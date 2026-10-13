@@ -32,7 +32,10 @@ fn persistence_round_trip_restores_destinations() {
         }
         NodeKind::Folder { .. } => panic!("expected file node"),
     }
-    assert_eq!(reloaded.state.history.len(), 1);
+    assert!(
+        reloaded.state.history.is_empty(),
+        "undo history from disk must not be restored"
+    );
 }
 
 #[test]

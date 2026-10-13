@@ -1,11 +1,16 @@
 use super::{Action, ActionMode, AppState};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::ui::toast::ToastLevel;
+
+/// Caps a cloned project's config so a huge file cannot be read into memory.
+const MAX_CONFIG_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct PersistentData {
@@ -78,8 +83,87 @@ impl AppState {
 }
 
 pub fn load_persistent(path: &Path) -> Result<PersistentData> {
-    let content = std::fs::read_to_string(path).context("Failed to read config")?;
-    serde_json::from_str(&content).context("Failed to parse config")
+    let content = read_no_follow(path, MAX_CONFIG_BYTES).context("Failed to read config")?;
+    let mut data: PersistentData =
+        serde_json::from_str(&content).context("Failed to parse config")?;
+    // A project file is often cloned. Undo of a stored Copy/Remove would
+    // delete or plant files the first time the user presses `u`.
+    data.history.clear();
+    Ok(data)
+}
+
+fn read_no_follow(path: &Path, max_bytes: u64) -> Result<String> {
+    let meta =
+        fs::symlink_metadata(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    if meta.file_type().is_symlink() {
+        bail!("refusing to follow symlink {}", path.display());
+    }
+    if !meta.is_file() {
+        bail!("refusing to read non-file {}", path.display());
+    }
+    if meta.len() > max_bytes {
+        bail!(
+            "{} is {} bytes; refusing to read more than {max_bytes}",
+            path.display(),
+            meta.len()
+        );
+    }
+    let file =
+        fs::File::open(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    let mut buf = String::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_string(&mut buf)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    if buf.len() as u64 > max_bytes {
+        bail!("{} exceeds {max_bytes} bytes", path.display());
+    }
+    Ok(buf)
+}
+
+/// Replace `path` without following a final symlink. `std::fs::write` opens
+/// with truncation and would overwrite the symlink target (for example
+/// `~/.bashrc` when a repo committed `.dd_dotstore.json` as a link).
+fn write_no_follow(path: &Path, contents: &str) -> Result<()> {
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            bail!("refusing to follow symlink {}", path.display());
+        }
+        if !meta.is_file() {
+            bail!("refusing to overwrite non-file {}", path.display());
+        }
+    }
+
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    fs::create_dir_all(parent).with_context(|| format!("Failed to create {}", parent.display()))?;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config");
+    let tmp = parent.join(format!(".{file_name}.{}.{nanos}.tmp", std::process::id()));
+    let result = (|| -> Result<()> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .with_context(|| format!("Failed to write {}", path.display()))?;
+        file.write_all(contents.as_bytes())
+            .with_context(|| format!("Failed to write {}", path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("Failed to write {}", path.display()))?;
+        fs::rename(&tmp, path).with_context(|| format!("Failed to replace {}", path.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 pub fn load(path: &Path) -> Result<AppState> {
@@ -110,6 +194,6 @@ pub fn save(state: &AppState, path: &Path) -> Result<()> {
     };
 
     let json = serde_json::to_string_pretty(&data)?;
-    std::fs::write(path, json)?;
+    write_no_follow(path, &json)?;
     Ok(())
 }
