@@ -22,3 +22,5 @@ jobs:
         run: cargo test
       - name: install.sh syntax
         run: bash -n install.sh
+      - name: install.sh tarball checks
+        run: bash tests/install_tarball.sh
