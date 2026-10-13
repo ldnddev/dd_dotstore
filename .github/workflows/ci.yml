@@ -6,11 +6,17 @@ on:
   pull_request:
     branches: [master]
 
+# Repo default token is contents:write. This job runs PR code via cargo test.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
