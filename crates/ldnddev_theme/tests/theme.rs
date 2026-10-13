@@ -79,6 +79,55 @@ fn extra_fields_appear_and_save() {
 }
 
 #[test]
+fn quoted_ampersand_is_not_an_alias() {
+    let mut yaml = "version: 1\nheader_quotes:\n  - \"rock & roll\"\ncolors:\n".to_string();
+    for field in COLOR_FIELDS {
+        yaml.push_str(&format!("  {}: \"#010203\"\n", field.key));
+    }
+    let palette = load_from_str(&yaml, ParseMode::Strict, ThemeSource::Local).expect("load");
+    assert_eq!(palette.header_quotes, vec!["rock & roll".to_string()]);
+}
+
+#[test]
+fn yaml_aliases_are_rejected() {
+    let err = load_from_str(
+        "version: &v 1\ncolors:\n  base_background: \"#010203\"\n",
+        ParseMode::Lenient,
+        ThemeSource::Local,
+    )
+    .expect_err("alias");
+    assert!(err.to_string().contains("anchors and aliases"), "{err}");
+}
+
+#[test]
+fn save_theme_does_not_follow_symlink() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let target = dir.path().join("important.txt");
+    std::fs::write(&target, "ORIGINAL").expect("write target");
+    let link = dir.path().join("dd_test_theme.yml");
+    std::os::unix::fs::symlink(&target, &link).expect("symlink");
+    let editor = ThemeEditor::new(Palette::builtin(), &[]);
+    let err = save_theme(
+        &editor.palette,
+        dir.path(),
+        "dd_test_theme.yml",
+        ThemeSaveTarget::Local,
+        None,
+        &editor.fields,
+    )
+    .expect_err("refuse symlink");
+    assert!(format!("{err:#}").contains("symlink"), "{err:#}");
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("target"),
+        "ORIGINAL"
+    );
+    assert!(std::fs::symlink_metadata(&link)
+        .expect("link")
+        .file_type()
+        .is_symlink());
+}
+
+#[test]
 fn hex_parse_and_commit() {
     assert_eq!(parse_hex_input("aabbcc").unwrap().to_hex(), "#AABBCC");
     let mut editor = ThemeEditor::new(Palette::builtin(), &[]);

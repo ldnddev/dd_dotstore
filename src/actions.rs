@@ -13,7 +13,7 @@ use crate::ui::toast::ToastLevel;
 use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
@@ -50,8 +50,8 @@ fn create_symlink_with_overwrite(
 
     #[cfg(unix)]
     {
-        let src_abs = state.project_root.join(rel_src);
-        if !src_abs.exists() {
+        let src_abs = source_in_project(&state.project_root, rel_src)?;
+        if fs::symlink_metadata(&src_abs).is_err() {
             bail!("Source does not exist: {}", src_abs.display());
         }
 
@@ -107,8 +107,8 @@ fn create_copy_with_overwrite(
     dest: &Path,
     overwrite_existing: bool,
 ) -> Result<bool> {
-    let src_abs = state.project_root.join(rel_src);
-    if !src_abs.exists() {
+    let src_abs = source_in_project(&state.project_root, rel_src)?;
+    if fs::symlink_metadata(&src_abs).is_err() {
         bail!("Source does not exist: {}", src_abs.display());
     }
 
@@ -143,18 +143,59 @@ fn create_copy_with_overwrite(
     Ok(true)
 }
 
+/// Relative project path with no `..` and no absolute prefix.
+fn source_in_project(project_root: &Path, rel_src: &Path) -> Result<PathBuf> {
+    if rel_src.as_os_str().is_empty() || rel_src.is_absolute() {
+        bail!("source path must stay inside the project");
+    }
+    for component in rel_src.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            _ => bail!("source path must stay inside the project"),
+        }
+    }
+    Ok(project_root.join(rel_src))
+}
+
+/// Copy a tree without following symlinks or reading special files.
+/// A cloned repo can contain `keys -> ~/.ssh` or a fifo; following those
+/// would duplicate secrets or block on a pipe.
 fn copy_path_recursive(src: &Path, dest: &Path) -> Result<()> {
-    let meta = fs::metadata(src)?;
-    if meta.is_dir() {
+    let meta =
+        fs::symlink_metadata(src).with_context(|| format!("Failed to read {}", src.display()))?;
+    let file_type = meta.file_type();
+    if file_type.is_symlink() {
+        #[cfg(unix)]
+        {
+            let target = fs::read_link(src)
+                .with_context(|| format!("Failed to read symlink {}", src.display()))?;
+            unix_fs::symlink(&target, dest).with_context(|| {
+                format!(
+                    "Failed to recreate symlink {} -> {}",
+                    dest.display(),
+                    target.display()
+                )
+            })?;
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            bail!("refusing to copy symlink {}", src.display());
+        }
+    }
+    if file_type.is_dir() {
         fs::create_dir_all(dest)?;
         for entry in fs::read_dir(src)? {
             let entry = entry?;
             copy_path_recursive(&entry.path(), &dest.join(entry.file_name()))?;
         }
-    } else {
-        let _ = fs::copy(src, dest)?;
+        return Ok(());
     }
-    Ok(())
+    if file_type.is_file() {
+        fs::copy(src, dest)?;
+        return Ok(());
+    }
+    bail!("refusing to copy special file {}", src.display());
 }
 
 fn remove_path_any(path: &Path) -> Result<()> {
@@ -615,7 +656,8 @@ pub fn import_from_path(state: &mut AppState, import_path: &Path) -> Result<()> 
     state.persisted_symlinks = imported.symlinks;
     state.persisted_modes = imported.modes;
     state.persisted_groups = imported.groups;
-    state.history = imported.history.into_iter().collect();
+    // `load_persistent` already drops on-disk undo history.
+    state.history.clear();
     // 1.1 JSON without the key must not clobber session ignores.
     if let Some(pats) = imported.ignore_patterns {
         state.ignore_patterns = pats;
