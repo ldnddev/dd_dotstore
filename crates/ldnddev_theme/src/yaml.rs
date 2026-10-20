@@ -204,7 +204,22 @@ fn read_no_follow(path: &Path, max_bytes: u64) -> Result<String> {
         );
     }
     let file =
-        fs::File::open(path).with_context(|| format!("Failed to read {}", path.display()))?;
+        open_no_follow(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    // Stat the fd, not the path. A symlink or fifo swapped in after the
+    // path check must not be followed or block this read.
+    let opened = file
+        .metadata()
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    if opened.file_type().is_symlink() || !opened.is_file() {
+        bail!("refusing to read non-file {}", path.display());
+    }
+    if opened.len() > max_bytes {
+        bail!(
+            "{} is {} bytes; refusing to read more than {max_bytes}",
+            path.display(),
+            opened.len()
+        );
+    }
     let mut buf = String::new();
     file.take(max_bytes.saturating_add(1))
         .read_to_string(&mut buf)
@@ -213,6 +228,40 @@ fn read_no_follow(path: &Path, max_bytes: u64) -> Result<String> {
         bail!("{} exceeds {max_bytes} bytes", path.display());
     }
     Ok(buf)
+}
+
+/// Open the final path component without following a symlink.
+///
+/// `File::open` follows a symlink swapped in after `symlink_metadata`.
+/// `O_NOFOLLOW` makes that open fail. `O_NONBLOCK` keeps a swapped-in fifo
+/// from blocking. Linux values: `O_NOFOLLOW` is `0x20000`, `O_NONBLOCK` is `0x800`.
+fn open_no_follow(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NOFOLLOW does not follow a final symlink. O_NONBLOCK so a fifo
+        // open returns instead of waiting.
+        const O_NOFOLLOW: i32 = 0x20000;
+        const O_NONBLOCK: i32 = 0x800;
+        options.custom_flags(O_NOFOLLOW | O_NONBLOCK);
+    }
+    let opened = options.open(path);
+    #[cfg(target_os = "linux")]
+    {
+        // ELOOP. ErrorKind::FilesystemLoop is still unstable.
+        const ELOOP: i32 = 40;
+        if let Err(err) = &opened {
+            if err.raw_os_error() == Some(ELOOP) {
+                return Err(std::io::Error::new(
+                    err.kind(),
+                    format!("refusing to follow symlink {}", path.display()),
+                ));
+            }
+        }
+    }
+    opened
 }
 
 fn write_no_follow(path: &Path, contents: &str) -> Result<()> {

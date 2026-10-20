@@ -5,8 +5,8 @@ use dd_dotstore::actions::{create_copy, undo_last};
 use dd_dotstore::app::App;
 use dd_dotstore::state::NodeKind;
 use dd_dotstore::tree::build_tree;
-use std::fs;
-use std::os::unix::fs::symlink;
+use std::fs::{self, OpenOptions};
+use std::os::unix::fs::{OpenOptionsExt, symlink};
 use std::path::Path;
 use std::process::Command;
 
@@ -122,6 +122,36 @@ fn config_symlink_is_not_read_or_written() {
             .file_type()
             .is_symlink()
     );
+}
+
+#[test]
+fn linux_o_nofollow_does_not_open_a_symlink() {
+    let root = TempRoot::create("o_nofollow");
+    let target = root.join("target");
+    fs::write(&target, "secret").expect("target");
+    let link = root.join("link");
+    symlink(&target, &link).expect("link");
+    // Same Linux flags as `open_no_follow`: O_NOFOLLOW is 0x20000.
+    let err = OpenOptions::new()
+        .read(true)
+        .custom_flags(0x20000)
+        .open(&link)
+        .expect_err("symlink open");
+    assert_eq!(err.raw_os_error(), Some(40), "{err}");
+    assert_eq!(fs::read_to_string(&target).expect("target"), "secret");
+}
+
+#[test]
+fn config_fifo_is_refused_without_blocking() {
+    let root = TempRoot::create("cfg_fifo");
+    let fifo = root.join(".dd_dotstore.json");
+    let status = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+    assert!(status.success());
+    let err = match App::new_with_root(&root) {
+        Ok(_) => panic!("fifo config should not load"),
+        Err(err) => err,
+    };
+    assert!(format!("{err:#}").contains("non-file"), "{err:#}");
 }
 
 #[test]
