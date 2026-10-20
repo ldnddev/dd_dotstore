@@ -36,6 +36,11 @@ fn persistence_round_trip_restores_destinations() {
         reloaded.state.history.is_empty(),
         "undo history from disk must not be restored"
     );
+    let raw = fs::read_to_string(root.join(".dd_dotstore.json")).expect("config text");
+    assert!(
+        raw.contains("\"history\": []"),
+        "undo actions must not be written: {raw}"
+    );
 }
 
 #[test]
