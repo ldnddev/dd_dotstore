@@ -37,7 +37,7 @@ Requires Rust 1.85+ (edition 2024) and a Unix-like OS (symlinks). Config is `.dd
 
 - Tree of the project, multi-select, LINK or COPY per item
 - Smart dest defaults (XDG / `$HOME` / `.linked` fallback)
-- Plan dialog, overwrite warnings, undo (last 10)
+- Plan dialog, overwrite warnings, undo (last 10, this session)
 - Groups, reverse-import (`A`), doctor (`D`)
 - Theme editor (`F2`), ignore editor, import/export
 - Keyboard and mouse; help is `F1`

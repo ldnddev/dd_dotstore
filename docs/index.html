@@ -344,7 +344,7 @@ dd_dotstore ~/dotfiles</code></pre>
           <img src="images/06-overwrite.png" width="2278" height="1468" alt="Overwrite warning modal with a red border, listing FILE /tmp/dd-home/.gitconfig.">
           <figcaption>Confirm with <kbd>Y</kbd>. Clicking inside this dialog does nothing — keys only.</figcaption>
         </figure>
-        <p><kbd>x</kbd> plans a remove. It never guesses a dest: only assigned destinations are removed. <kbd>u</kbd> undoes the last action (cap 10, persisted).</p>
+        <p><kbd>x</kbd> plans a remove. It never guesses a dest: only assigned destinations are removed. <kbd>u</kbd> undoes the last action in this session (cap 10). It is not restored after a restart.</p>
       </section>
 
       <section id="groups">
@@ -439,7 +439,7 @@ dd_dotstore ~/dotfiles</code></pre>
         <table>
           <thead><tr><th>Path</th><th>Role</th></tr></thead>
           <tbody>
-            <tr><td><code>.dd_dotstore.json</code></td><td>Per-project map: dests, modes, groups, ignores, undo history</td></tr>
+            <tr><td><code>.dd_dotstore.json</code></td><td>Per-project map: dests, modes, groups, and ignores. Saved undo history is ignored on load.</td></tr>
             <tr><td><code>./dd_dotstore_theme.yml</code></td><td>Local theme (wins lookup)</td></tr>
             <tr><td><code>$XDG_CONFIG_HOME/ldnddev/dd_dotstore_theme.yml</code></td><td>Global theme (installer default)</td></tr>
             <tr><td><code>~/.dd_dotstore/exports/</code></td><td>Exported configs</td></tr>

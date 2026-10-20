@@ -188,7 +188,9 @@ pub fn save(state: &AppState, path: &Path) -> Result<()> {
     let data = PersistentData {
         symlinks: snap.dests,
         modes: snap.modes,
-        history: state.history.iter().cloned().collect(),
+        // Session undo stays in memory. Writing it would hand an older
+        // binary a Copy/Remove it still replays on `u`.
+        history: Vec::new(),
         ignore_patterns: Some(state.ignore_patterns.clone()),
         groups: snap.groups,
     };
