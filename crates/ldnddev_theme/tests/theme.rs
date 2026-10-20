@@ -1,8 +1,9 @@
 use ldnddev_theme::{
-    load_from_str, parse_hex_input, render_yaml, save_theme, EditorKey, EditorOutcome, Palette,
-    ParseMode, ThemeEditor, ThemeSaveTarget, ThemeSource, COLOR_FIELDS, EXTRA_MODAL_HEADER,
-    EXTRA_SELECTION,
+    load_from_file, load_from_str, parse_hex_input, render_yaml, save_theme, EditorKey,
+    EditorOutcome, Palette, ParseMode, ThemeEditor, ThemeSaveTarget, ThemeSource, COLOR_FIELDS,
+    EXTRA_MODAL_HEADER, EXTRA_SELECTION,
 };
+use std::process::Command;
 
 fn full_yaml() -> String {
     let mut body = String::from("version: 1\nheader_quotes:\n  - \"Hello\"\ncolors:\n");
@@ -97,6 +98,16 @@ fn yaml_aliases_are_rejected() {
     )
     .expect_err("alias");
     assert!(err.to_string().contains("anchors and aliases"), "{err}");
+}
+
+#[test]
+fn theme_fifo_is_refused_without_blocking() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let fifo = dir.path().join("theme.yml");
+    let status = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+    assert!(status.success());
+    let err = load_from_file(&fifo, ParseMode::Lenient, ThemeSource::Local).expect_err("fifo");
+    assert!(format!("{err:#}").contains("non-file"), "{err:#}");
 }
 
 #[test]
