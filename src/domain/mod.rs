@@ -8,7 +8,7 @@ pub use health::*;
 pub use node::*;
 pub use persist::*;
 
-use crate::theme::{Theme, ThemeEditor, ThemeStatus};
+use crate::theme::{OmarchyPaths, Theme, ThemeEditor, ThemePicker, ThemeStatus};
 use crate::ui::toast::{Toast, ToastLevel};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, VecDeque};
@@ -60,6 +60,9 @@ pub enum Modal {
         scroll: usize,
     },
     ThemeEditor(ThemeEditor),
+    /// Omarchy list. The picker state lives on [`AppState`] so this slot can
+    /// switch to the hex editor without dropping the list.
+    ThemePicker,
 }
 
 #[derive(Clone, Debug)]
@@ -181,7 +184,6 @@ pub struct PointerState {
     pub dest_follow_path: Option<PathBuf>,
 }
 
-#[derive(Default)]
 pub struct AppState {
     pub project_root: PathBuf,
     pub config_path: PathBuf,
@@ -205,7 +207,45 @@ pub struct AppState {
     pub persist_retry_at: Option<Instant>,
     pub last_save_error: Option<String>,
     pub theme_status: ThemeStatus,
+    /// Kept beside [`Modal`] so the hex editor can open without dropping the list.
+    pub theme_picker: Option<ThemePicker>,
+    pub omarchy_paths: OmarchyPaths,
+    /// Stamp of the followed desktop theme file. Compared on focus gain.
+    pub follow_stamp: Option<String>,
     pub pointer: PointerState,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            project_root: PathBuf::new(),
+            config_path: PathBuf::new(),
+            tree: Vec::new(),
+            nodes: Vec::new(),
+            list_state: ratatui::widgets::ListState::default(),
+            status_list_state: ratatui::widgets::ListState::default(),
+            filter: String::new(),
+            filter_editing: false,
+            filter_snapshot: String::new(),
+            modal: None,
+            toast: None,
+            history: VecDeque::new(),
+            ignore_patterns: Vec::new(),
+            theme: Theme::default(),
+            header_copy: String::new(),
+            persisted_symlinks: HashMap::new(),
+            persisted_modes: HashMap::new(),
+            persisted_groups: HashMap::new(),
+            dirty_since: None,
+            persist_retry_at: None,
+            last_save_error: None,
+            theme_status: ThemeStatus::default(),
+            theme_picker: None,
+            omarchy_paths: OmarchyPaths::system(),
+            follow_stamp: None,
+            pointer: PointerState::default(),
+        }
+    }
 }
 
 impl AppState {
@@ -240,5 +280,13 @@ impl AppState {
         if self.toast.as_ref().is_some_and(Toast::is_expired) {
             self.toast = None;
         }
+    }
+
+    pub fn theme_ui_open(&self) -> bool {
+        self.theme_picker.is_some()
+            || matches!(
+                self.modal,
+                Some(Modal::ThemeEditor(_)) | Some(Modal::ThemePicker)
+            )
     }
 }

@@ -1,5 +1,8 @@
 use crate::domain::{AppState, BulkAction, Conflict, DoctorSeverity, Modal};
-use crate::theme::{ThemeEditorRow, color_from_rgb, color_rgb, color_to_hex, theme_editor_rows};
+use crate::theme::{
+    PickerRow, ThemeEditorRow, ThemePicker, color_from_rgb, color_rgb, color_to_hex,
+    theme_editor_rows,
+};
 use crate::ui::centered_rect;
 use ratatui::{
     Frame,
@@ -35,7 +38,10 @@ fn preview_overwrite_counts(lines: &[String]) -> (usize, usize, usize) {
 }
 
 pub(crate) fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let modal_area = if matches!(state.modal, Some(Modal::ThemeEditor(_))) {
+    let modal_area = if matches!(
+        state.modal,
+        Some(Modal::ThemeEditor(_)) | Some(Modal::ThemePicker)
+    ) {
         centered_rect(80, 80, area)
     } else {
         centered_rect(70, 60, area)
@@ -218,7 +224,7 @@ pub(crate) fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
 q / Q        Quit\n\
 Esc          Close modal / clear filter / clear selection (does not quit)\n\
 F1           Toggle help\n\
-F2           Theme editor (live preview; Tab local/global; Y save)\n\
+F2           Omarchy themes (Enter apply, e edit, s save)\n\
 F3           Toggle credits\n\
 j/k or ↑/↓   Navigate\n\
 Space        Toggle selection (file/folder)\n\
@@ -277,7 +283,7 @@ Tree: proper connectors (├ └ │) + counts + subtree badges (●) for densit
 Theme source: {}\n\
 Theme status: {}\n\
 \n\
-F2 opens the theme editor (default save: global).\n\
+F2 opens Omarchy themes (Enter apply, e edit, s save; default save: global).\n\
 Press Esc/F3 to close.",
                     state.theme.source.label(),
                     state.theme_status.message
@@ -430,13 +436,23 @@ Press Esc/F3 to close.",
                 );
                 f.render_widget(text, modal_area);
             }
+            Modal::ThemePicker => {
+                if let Some(picker) = state.theme_picker.clone() {
+                    draw_theme_picker(f, &state.theme, modal_area, &picker);
+                }
+            }
             Modal::ThemeEditor(editor) => {
                 let rows = theme_editor_rows(&editor.fields);
                 let channel = ["R", "G", "B"][editor.channel.min(2)];
                 let target = editor.save_target.label().to_uppercase();
+                let esc = if state.theme_picker.is_some() {
+                    "Esc back"
+                } else {
+                    "Esc revert"
+                };
                 let mut lines: Vec<Line<'_>> = vec![
                     Line::from(format!(
-                        "Save: {target} (Tab)   Channel: {channel} ([/])   Y save   R reset   Esc revert"
+                        "Save: {target} (Tab)   Channel: {channel} ([/])   Y save   R reset   {esc}"
                     )),
                     Line::from(if editor.editing_hex {
                         format!("Hex: {}█   Enter apply   Esc cancel edit", editor.hex_draft)
@@ -506,4 +522,46 @@ Press Esc/F3 to close.",
             }
         }
     }
+}
+
+fn draw_theme_picker(f: &mut Frame, theme: &crate::theme::Theme, area: Rect, picker: &ThemePicker) {
+    let mut lines = vec![
+        Line::from(format!(
+            "Save: {} (Tab)    Enter apply    e edit colors    s save    Esc revert",
+            picker.save_target.label()
+        )),
+        Line::from(""),
+    ];
+    let view_h = area.height.saturating_sub(5) as usize;
+    for (idx, row) in picker
+        .rows
+        .iter()
+        .enumerate()
+        .skip(picker.scroll)
+        .take(view_h.max(1))
+    {
+        let (label, detail) = match row {
+            PickerRow::Follow { name } => ("Follow desktop".to_string(), name.clone()),
+            PickerRow::Theme(theme) => (theme.name.clone(), theme.mode.label().to_string()),
+            PickerRow::Custom => ("Custom".to_string(), "built-in".to_string()),
+        };
+        let cursor = if idx == picker.selected { ">" } else { " " };
+        let style = if idx == picker.selected {
+            theme.selected
+        } else {
+            theme.modal_text
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{cursor} {label:<22} {detail}"),
+            style,
+        )));
+    }
+    let text = Paragraph::new(lines).block(
+        Block::default()
+            .title("F2 Themes")
+            .borders(Borders::ALL)
+            .border_style(theme.input_border_focus)
+            .style(theme.modal),
+    );
+    f.render_widget(text, area);
 }

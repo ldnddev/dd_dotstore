@@ -43,6 +43,14 @@ impl Deref for TempRoot {
     }
 }
 
+/// App with Omarchy discovery pointed at a missing root so F2 opens the hex editor.
+pub fn app(root: &Path) -> dd_dotstore::app::App {
+    let mut app = dd_dotstore::app::App::new_with_root(root).expect("app");
+    app.state.omarchy_paths =
+        dd_dotstore::theme::OmarchyPaths::from_root(Path::new("/nonexistent/dd_dotstore_omarchy"));
+    app
+}
+
 pub fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }

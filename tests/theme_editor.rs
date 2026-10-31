@@ -1,13 +1,14 @@
 mod common;
 
-use common::{TempRoot, key};
+use common::{TempRoot, app, key};
 use crossterm::event::KeyCode;
 use dd_dotstore::app::App;
 use dd_dotstore::domain::Modal;
 use dd_dotstore::inputs::handle_key;
 use dd_dotstore::theme::{
-    COLOR_FIELDS, Theme, ThemeColors, ThemeSaveTarget, ThemeSource, color_from_rgb, color_to_hex,
-    load_theme_with, nudge_channel, parse_hex_input, render_theme_yaml, save_theme,
+    COLOR_FIELDS, OmarchyChoice, OmarchyPaths, PickerRow, Theme, ThemeColors, ThemeSaveTarget,
+    ThemeSource, color_from_rgb, color_to_hex, load_theme_with, nudge_channel, parse_hex_input,
+    render_theme_yaml, save_theme,
 };
 use ratatui::style::Color;
 use std::fs;
@@ -56,7 +57,7 @@ fn nudge_channel_clamps() {
 fn f2_opens_editor_with_global_save_default() {
     let root = TempRoot::create("theme_open");
     fs::write(root.join(".bashrc"), "x").expect("write");
-    let mut app = App::new_with_root(&root).expect("app");
+    let mut app = app(&root);
     let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("F2");
     match &app.state.modal {
         Some(Modal::ThemeEditor(editor)) => {
@@ -71,7 +72,7 @@ fn f2_opens_editor_with_global_save_default() {
 fn tab_toggles_save_target_and_esc_reverts_colors() {
     let root = TempRoot::create("theme_esc");
     fs::write(root.join(".bashrc"), "x").expect("write");
-    let mut app = App::new_with_root(&root).expect("app");
+    let mut app = app(&root);
     let original = app.state.theme.colors;
     let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("F2");
     let _ = handle_key(&mut app.state, key(KeyCode::Tab)).expect("tab");
@@ -148,7 +149,7 @@ fn render_yaml_keeps_quotes_and_hex() {
 fn reset_restores_builtin_colors_without_closing() {
     let root = TempRoot::create("theme_reset");
     fs::write(root.join(".bashrc"), "x").expect("write");
-    let mut app = App::new_with_root(&root).expect("app");
+    let mut app = app(&root);
     let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("F2");
     let _ = handle_key(&mut app.state, key(KeyCode::Char('l'))).expect("nudge");
     assert_ne!(
@@ -158,4 +159,60 @@ fn reset_restores_builtin_colors_without_closing() {
     let _ = handle_key(&mut app.state, key(KeyCode::Char('R'))).expect("reset");
     assert!(matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
     assert_eq!(app.state.theme.colors, ThemeColors::default());
+}
+
+#[test]
+fn f2_lists_omarchy_themes_and_esc_reverts() {
+    let root = TempRoot::create("theme_omarchy_app");
+    fs::write(root.join(".bashrc"), "x").expect("write");
+    let dir = TempRoot::create("theme_omarchy_root");
+    let src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/ldnddev_theme/tests/fixtures/omarchy/tokyo-night/colors.toml");
+    fs::create_dir_all(dir.join("stock/tokyo-night")).expect("mkdir");
+    fs::copy(&src, dir.join("stock/tokyo-night/colors.toml")).expect("copy");
+    fs::create_dir_all(dir.join("state/theme")).expect("state");
+    fs::write(dir.join("state/theme.name"), "tokyo-night\n").expect("name");
+    fs::copy(&src, dir.join("state/theme/colors.toml")).expect("current");
+
+    let mut app = App::new_with_root(&root).expect("app");
+    app.state.theme = Theme::default();
+    app.state.omarchy_paths = OmarchyPaths::from_root(&dir);
+    let before = color_to_hex(app.state.theme.colors.body_background);
+
+    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("F2");
+    let picker = app.state.theme_picker.as_ref().expect("picker");
+    assert!(matches!(
+        picker.rows.get(picker.selected),
+        Some(PickerRow::Custom)
+    ));
+    assert!(matches!(app.state.modal, Some(Modal::ThemePicker)));
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Enter)).expect("enter custom");
+    assert_eq!(color_to_hex(app.state.theme.colors.body_background), before);
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('g'))).expect("top");
+    let _ = handle_key(&mut app.state, key(KeyCode::Enter)).expect("apply");
+    assert_eq!(
+        color_to_hex(app.state.theme.colors.body_background),
+        "#1A1B26"
+    );
+    assert_eq!(app.state.theme.omarchy, Some(OmarchyChoice::Follow));
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('e'))).expect("edit");
+    assert!(matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
+    assert!(app.state.theme_picker.is_some());
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Esc)).expect("back");
+    assert!(matches!(app.state.modal, Some(Modal::ThemePicker)));
+    assert!(app.state.theme_picker.is_some());
+    assert_eq!(
+        color_to_hex(app.state.theme.colors.body_background),
+        "#1A1B26"
+    );
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Esc)).expect("close");
+    assert!(app.state.modal.is_none());
+    assert!(app.state.theme_picker.is_none());
+    assert_eq!(color_to_hex(app.state.theme.colors.body_background), before);
+    assert!(app.state.theme.omarchy.is_none());
 }

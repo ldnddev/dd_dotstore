@@ -3,8 +3,8 @@ use crate::domain::{
 };
 use crate::scan::{adopt_candidates_for_state, collect_doctor_findings};
 use crate::theme::{
-    ThemeEditor, ThemeSaveTarget, ThemeSource, ThemeStatus, default_config_home, local_theme_path,
-    palette_from_theme, save_theme, theme_from_palette,
+    ThemeEditor, ThemePicker, ThemeSaveTarget, ThemeSource, ThemeStatus, default_config_home,
+    local_theme_path, palette_from_theme, save_theme, theme_from_palette,
 };
 use crate::tree::{
     expand_ancestors, find_mut_node, find_node, flatten_visible, set_action_mode, set_dest,
@@ -843,25 +843,94 @@ pub fn jump_to_doctor_source(state: &mut AppState, src: &Path) {
 }
 
 pub fn open_theme_editor(state: &mut AppState) {
-    state.modal = Some(Modal::ThemeEditor(ThemeEditor::new(
-        palette_from_theme(&state.theme),
-        &[],
-    )));
+    if state.theme_ui_open() {
+        close_theme(state, true);
+        return;
+    }
+    let palette = palette_from_theme(&state.theme);
+    let picker = ThemePicker::new(palette.clone(), &[], state.omarchy_paths.clone());
+    if picker.lists_omarchy() {
+        state.theme_picker = Some(picker);
+        state.modal = Some(Modal::ThemePicker);
+    } else {
+        state.theme_picker = None;
+        state.modal = Some(Modal::ThemeEditor(ThemeEditor::new(palette, &[])));
+    }
 }
 
 pub fn apply_live_theme_editor(state: &mut AppState) {
-    let Some(Modal::ThemeEditor(editor)) = &state.modal else {
+    let Some((palette, target)) = (|| {
+        let Modal::ThemeEditor(editor) = state.modal.as_ref()? else {
+            return None;
+        };
+        Some((editor.palette.clone(), editor.save_target))
+    })() else {
         return;
     };
-    let palette = editor.palette.clone();
+    if let Some(picker) = state.theme_picker.as_mut() {
+        picker.palette = palette.clone();
+        picker.save_target = target;
+    }
     state.theme = theme_from_palette(palette);
 }
 
-pub fn revert_theme_editor(state: &mut AppState) {
+pub fn apply_live_theme_picker(state: &mut AppState) {
+    let Some(palette) = state
+        .theme_picker
+        .as_ref()
+        .map(|picker| picker.palette.clone())
+    else {
+        return;
+    };
+    state.theme = theme_from_palette(palette);
+}
+
+/// Esc. Editor returns to the list; the list reverts to the palette from when F2 opened.
+pub fn escape_theme(state: &mut AppState) {
     if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
         editor.revert();
     }
-    apply_live_theme_editor(state);
+    if matches!(state.modal, Some(Modal::ThemeEditor(_))) && state.theme_picker.is_some() {
+        let Some(Modal::ThemeEditor(editor)) = state.modal.take() else {
+            return;
+        };
+        let palette = editor.palette.clone();
+        let target = editor.save_target;
+        if let Some(picker) = state.theme_picker.as_mut() {
+            picker.palette = palette.clone();
+            picker.save_target = target;
+        }
+        state.theme = theme_from_palette(palette);
+        state.modal = Some(Modal::ThemePicker);
+        return;
+    }
+    close_theme(state, true);
+}
+
+pub fn close_theme(state: &mut AppState, revert: bool) {
+    if revert {
+        if state.theme_picker.is_some() {
+            let palette = state
+                .theme_picker
+                .as_ref()
+                .map(|picker| picker.revert_palette());
+            if let Some(palette) = palette {
+                state.theme = theme_from_palette(palette);
+            }
+        } else {
+            let palette = if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
+                editor.revert();
+                Some(editor.palette.clone())
+            } else {
+                None
+            };
+            if let Some(palette) = palette {
+                state.theme = theme_from_palette(palette);
+            }
+        }
+    }
+    state.theme_picker = None;
+    state.modal = None;
 }
 
 pub fn theme_editor_select(state: &mut AppState, selected: usize) {
@@ -871,9 +940,10 @@ pub fn theme_editor_select(state: &mut AppState, selected: usize) {
 }
 
 pub fn save_theme_editor(state: &mut AppState) -> Result<()> {
-    let Some(target) = theme_editor_save_target(state) else {
+    let Some((palette, target)) = pending_theme_save(state) else {
         return Ok(());
     };
+    state.theme = theme_from_palette(palette);
     let local_path = local_theme_path(&state.project_root);
     let path = save_theme(
         &state.theme,
@@ -887,6 +957,7 @@ pub fn save_theme_editor(state: &mut AppState) -> Result<()> {
     };
     state.theme.source = source;
     state.theme_status = ThemeStatus::healthy(source, state.theme.version);
+    state.follow_stamp = ldnddev_theme::follow_stamp(&state.omarchy_paths);
     if target == ThemeSaveTarget::Global && local_path.exists() {
         state.show_toast(
             ToastLevel::Warning,
@@ -902,13 +973,18 @@ pub fn save_theme_editor(state: &mut AppState) -> Result<()> {
             format!("Saved {} theme to {}", target.label(), path.display()),
         );
     }
+    state.theme_picker = None;
     state.modal = None;
     Ok(())
 }
 
-fn theme_editor_save_target(state: &AppState) -> Option<ThemeSaveTarget> {
+fn pending_theme_save(state: &AppState) -> Option<(ldnddev_theme::Palette, ThemeSaveTarget)> {
     match &state.modal {
-        Some(Modal::ThemeEditor(editor)) => Some(editor.save_target),
+        Some(Modal::ThemeEditor(editor)) => Some((editor.palette.clone(), editor.save_target)),
+        Some(Modal::ThemePicker) => state
+            .theme_picker
+            .as_ref()
+            .map(|picker| (picker.palette.clone(), picker.save_target)),
         _ => None,
     }
 }

@@ -3,14 +3,14 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::actions::{
     action_targets, apply_adopt_candidates, apply_group_name, apply_live_theme_editor,
-    assign_destination, collect_preview_lines, confirm_bulk, confirm_bulk_with_overwrite,
-    export_to_path, import_from_path, jump_to_doctor_source, open_adopt_picker, open_doctor,
-    open_export_picker, open_group_editor, open_import_picker, open_theme_editor,
-    revert_theme_editor, save_theme_editor, select_group_of_highlight, selected_create_conflicts,
-    undo_last,
+    apply_live_theme_picker, assign_destination, collect_preview_lines, confirm_bulk,
+    confirm_bulk_with_overwrite, escape_theme, export_to_path, import_from_path,
+    jump_to_doctor_source, open_adopt_picker, open_doctor, open_export_picker, open_group_editor,
+    open_import_picker, open_theme_editor, save_theme_editor, select_group_of_highlight,
+    selected_create_conflicts, undo_last,
 };
 use crate::domain::{AppState, BrowserState, BulkAction, Modal, Node, NodeKind};
-use crate::theme::{EditorKey, EditorOutcome};
+use crate::theme::{EditorKey, EditorOutcome, PickerOutcome, ThemeEditor};
 use crate::tree::{
     AssignmentSource, find_mut_node, flatten_visible, rebuild_tree, toggle_expand, toggle_selected,
 };
@@ -18,9 +18,8 @@ use crate::ui::toast::ToastLevel;
 use std::path::PathBuf;
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
-    if matches!(state.modal, Some(Modal::ThemeEditor(_))) && key.code == KeyCode::F(2) {
-        revert_theme_editor(state);
-        state.modal = None;
+    if state.theme_ui_open() && key.code == KeyCode::F(2) {
+        open_theme_editor(state);
         return Ok(false);
     }
 
@@ -720,6 +719,7 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         }
 
         Modal::ThemeEditor(_) => return handle_theme_editor_key(state, key),
+        Modal::ThemePicker => return handle_theme_picker_key(state, key),
     }
 
     Ok(false)
@@ -743,14 +743,47 @@ fn handle_theme_editor_key(state: &mut AppState, key: KeyEvent) -> Result<bool> 
                 state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
             }
         }
-        EditorOutcome::Closed { .. } => {
-            apply_live_theme_editor(state);
-            state.modal = None;
-        }
+        EditorOutcome::Closed { .. } => escape_theme(state),
         EditorOutcome::HexError(err) => {
             state.show_toast(ToastLevel::Error, format!("Invalid hex: {err}"));
         }
         EditorOutcome::None => {}
+    }
+    Ok(false)
+}
+
+fn handle_theme_picker_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
+    let Some(ek) = map_editor_key(key) else {
+        return Ok(false);
+    };
+    let outcome = {
+        let Some(picker) = state.theme_picker.as_mut() else {
+            return Ok(false);
+        };
+        picker.handle(ek)
+    };
+    match outcome {
+        PickerOutcome::Applied => apply_live_theme_picker(state),
+        PickerOutcome::EditColors => {
+            let Some((palette, target)) = state
+                .theme_picker
+                .as_ref()
+                .map(|picker| (picker.palette.clone(), picker.save_target))
+            else {
+                return Ok(false);
+            };
+            let mut editor = ThemeEditor::new(palette, &[]);
+            editor.save_target = target;
+            state.modal = Some(Modal::ThemeEditor(editor));
+        }
+        PickerOutcome::RequestSave => {
+            if let Err(err) = save_theme_editor(state) {
+                state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
+            }
+        }
+        PickerOutcome::Error(msg) => state.show_toast(ToastLevel::Error, msg),
+        PickerOutcome::Closed { .. } => escape_theme(state),
+        PickerOutcome::None => {}
     }
     Ok(false)
 }

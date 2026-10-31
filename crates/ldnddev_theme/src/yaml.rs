@@ -1,4 +1,5 @@
 use crate::fields::{ColorField, COLOR_FIELDS};
+use crate::omarchy::OmarchyChoice;
 use crate::palette::{Palette, ThemeSource};
 use crate::rgb::{parse_hex_color, Rgb};
 use anyhow::{anyhow, bail, Context, Result};
@@ -25,6 +26,8 @@ pub enum ParseMode {
 struct RawThemeFile {
     version: Option<serde_yaml::Value>,
     #[serde(default)]
+    omarchy: Option<String>,
+    #[serde(default)]
     header_quotes: Vec<String>,
     colors: Option<HashMap<String, String>>,
 }
@@ -42,6 +45,10 @@ pub fn load_from_str(content: &str, mode: ParseMode, source: ThemeSource) -> Res
             crate::SUPPORTED_THEME_VERSION
         ));
     }
+    let omarchy = match file.omarchy.as_deref() {
+        Some(raw) => Some(OmarchyChoice::parse(raw)?),
+        None => None,
+    };
     let raw = file.colors.unwrap_or_default();
     let mut parsed: HashMap<String, Rgb> = HashMap::new();
     for (key, value) in raw {
@@ -51,7 +58,8 @@ pub fn load_from_str(content: &str, mode: ParseMode, source: ThemeSource) -> Res
         parsed.insert(key.clone(), parse_hex_color(&key, &value)?);
     }
 
-    if mode == ParseMode::Strict {
+    // An Omarchy link supplies the canonical colors. Listed keys are overrides.
+    if mode == ParseMode::Strict && omarchy.is_none() {
         for field in COLOR_FIELDS {
             if !parsed.contains_key(field.key) {
                 return Err(anyhow!("Missing required theme color `{}`", field.key));
@@ -60,8 +68,11 @@ pub fn load_from_str(content: &str, mode: ParseMode, source: ThemeSource) -> Res
     }
 
     let mut palette = Palette::builtin();
-    for (key, rgb) in parsed {
-        palette.set(&key, rgb);
+    for (key, rgb) in &parsed {
+        palette.set(key, *rgb);
+    }
+    if omarchy.is_some() {
+        palette.overrides = parsed.keys().cloned().collect();
     }
     palette.header_quotes = file
         .header_quotes
@@ -76,6 +87,7 @@ pub fn load_from_str(content: &str, mode: ParseMode, source: ThemeSource) -> Res
         .collect();
     palette.version = version;
     palette.source = source;
+    palette.omarchy = omarchy;
     Ok(palette)
 }
 
@@ -107,6 +119,11 @@ pub fn load_lookup(
 
 pub fn render_yaml(palette: &Palette, fields: &[ColorField]) -> String {
     let mut out = String::from("version: 1\n");
+    if let Some(choice) = &palette.omarchy {
+        out.push_str("omarchy: ");
+        out.push_str(choice.token());
+        out.push('\n');
+    }
     if !palette.header_quotes.is_empty() {
         out.push_str("header_quotes:\n");
         for quote in &palette.header_quotes {
@@ -114,6 +131,28 @@ pub fn render_yaml(palette: &Palette, fields: &[ColorField]) -> String {
             out.push_str(&yaml_quote(quote));
             out.push('\n');
         }
+    }
+    if palette.omarchy.is_some() {
+        let overrides: Vec<_> = fields
+            .iter()
+            .filter(|field| palette.overrides.contains(field.key))
+            .collect();
+        if overrides.is_empty() {
+            return out;
+        }
+        out.push_str("colors:\n");
+        for field in overrides {
+            let hex = palette
+                .get(field.key)
+                .map(|c| c.to_hex())
+                .unwrap_or_else(|| "#000000".to_string());
+            out.push_str("  ");
+            out.push_str(field.key);
+            out.push_str(": \"");
+            out.push_str(&hex);
+            out.push_str("\"\n");
+        }
+        return out;
     }
     out.push_str("colors:\n");
     let mut last_group = "";

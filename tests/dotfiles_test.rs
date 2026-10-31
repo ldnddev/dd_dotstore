@@ -1,6 +1,6 @@
 mod common;
 
-use common::{TempRoot, key, mouse_left};
+use common::{TempRoot, app, key, mouse_left};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_dotstore::actions::{
     action_targets, assign_destination, collect_preview_lines, create_copy, create_symlink,
@@ -485,7 +485,7 @@ fn f2_toggles_theme_editor() {
     let root = TempRoot::create("theme_f2");
     fs::write(root.join(".xinitrc"), "exec awesome").expect("write dotfile");
 
-    let mut app = App::new_with_root(&root).expect("app init");
+    let mut app = app(&root);
     let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("open theme");
     assert!(matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
     let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("close theme");

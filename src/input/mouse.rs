@@ -3,7 +3,7 @@ use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::time::Instant;
 
 use crate::actions::{
-    assign_destination, collect_preview_lines, revert_theme_editor, theme_editor_select,
+    assign_destination, collect_preview_lines, escape_theme, theme_editor_select,
 };
 use crate::domain::{AppState, Modal, NodeKind};
 use crate::input::hit_test::{
@@ -297,10 +297,11 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
     let inside_modal = rect_contains(modal_area, mouse.column, mouse.row);
     if !inside_modal {
         // Outside click cancels the modal (Esc semantics for most)
-        if matches!(state.modal, Some(Modal::ThemeEditor(_))) {
-            revert_theme_editor(state);
+        if state.theme_ui_open() {
+            escape_theme(state);
+        } else {
+            state.modal = None;
         }
-        state.modal = None;
         return Ok(false);
     }
 
@@ -546,7 +547,8 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             }
         }
 
-        Some(Modal::IgnoreEditor { .. })
+        Some(Modal::ThemePicker)
+        | Some(Modal::IgnoreEditor { .. })
         | Some(Modal::Help)
         | Some(Modal::Credits)
         | Some(Modal::ExportPicker { .. })

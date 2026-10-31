@@ -93,6 +93,9 @@ fn run_app(project_root: Option<PathBuf>) -> Result<()> {
                 Event::Resize(_, _) => {
                     // Next draw iteration will handle the new size
                 }
+                Event::FocusGained => {
+                    app.state.refresh_followed_theme();
+                }
                 _ => {}
             }
         }

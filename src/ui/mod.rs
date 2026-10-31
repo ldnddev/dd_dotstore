@@ -3,6 +3,7 @@ mod focus;
 mod modals;
 mod source;
 pub mod toast;
+mod toast_chrome;
 
 use crate::domain::AppState;
 use destinations::draw_status_panel;

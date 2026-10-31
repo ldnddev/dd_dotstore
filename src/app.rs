@@ -7,7 +7,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::{
     domain::{Action, AppState, PERSIST_IDLE, load},
     input::{handle_key, handle_mouse},
-    theme::{Theme, ThemeStatus, load_theme},
+    theme::{OmarchyChoice, Theme, ThemeStatus, load_theme_resolved},
     tree::{AssignmentSource, rebuild_tree},
     ui::draw,
 };
@@ -33,7 +33,9 @@ impl App {
 
         state.project_root = project_root.to_path_buf();
         state.config_path = config_path;
-        match load_theme(project_root) {
+        let omarchy_paths = ldnddev_theme::OmarchyPaths::system();
+        let config_home = ldnddev_theme::default_config_home();
+        match load_theme_resolved(project_root, config_home.as_deref(), &omarchy_paths) {
             Ok(theme) => {
                 state.theme_status = ThemeStatus::healthy(theme.source, theme.version);
                 state.theme = theme;
@@ -45,6 +47,11 @@ impl App {
                 ));
             }
         }
+        state.omarchy_paths = omarchy_paths;
+        state.follow_stamp = match &state.theme.omarchy {
+            Some(OmarchyChoice::Follow) => ldnddev_theme::follow_stamp(&state.omarchy_paths),
+            _ => None,
+        };
         state.header_copy = random_header_copy(&state.theme.header_quotes);
         rebuild_tree(&mut state, AssignmentSource::Persisted)?;
 
@@ -98,6 +105,44 @@ impl App {
 
     pub fn push_action(&mut self, action: Action) {
         crate::actions::push_history(&mut self.state, action);
+    }
+}
+
+impl AppState {
+    /// Re-read `omarchy: follow` when the desktop theme file changes.
+    /// Leaves the header line alone.
+    pub fn refresh_followed_theme(&mut self) -> bool {
+        if self.theme_ui_open() {
+            return false;
+        }
+        if !matches!(self.theme.omarchy, Some(OmarchyChoice::Follow)) {
+            return false;
+        }
+        let stamp = ldnddev_theme::follow_stamp(&self.omarchy_paths);
+        if stamp == self.follow_stamp {
+            return false;
+        }
+        let config_home = ldnddev_theme::default_config_home();
+        match load_theme_resolved(
+            &self.project_root,
+            config_home.as_deref(),
+            &self.omarchy_paths,
+        ) {
+            Ok(theme) => {
+                self.theme_status = ThemeStatus::healthy(theme.source, theme.version);
+                self.theme = theme;
+            }
+            Err(err) => {
+                let quotes = self.theme.header_quotes.clone();
+                self.theme = Theme::default();
+                self.theme.header_quotes = quotes;
+                let message = format!("Theme warning: {err:#}; using built-in defaults");
+                self.theme_status = ThemeStatus::warning(message.clone());
+                self.show_toast(crate::ui::toast::ToastLevel::Warning, message);
+            }
+        }
+        self.follow_stamp = stamp;
+        true
     }
 }
 

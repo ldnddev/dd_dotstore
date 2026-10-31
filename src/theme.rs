@@ -1,12 +1,13 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use ldnddev_theme::{Palette, ParseMode, Rgb};
 use ratatui::style::{Color, Modifier, Style};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub use ldnddev_theme::{
-    COLOR_FIELDS, ColorField, EditorKey, EditorOutcome, SUPPORTED_THEME_VERSION, ThemeEditor,
-    ThemeEditorRow, ThemeSaveTarget, ThemeSource, default_config_home, parse_hex_input,
-    theme_editor_rows,
+    COLOR_FIELDS, ColorField, EditorKey, EditorOutcome, OmarchyChoice, OmarchyPaths, PickerOutcome,
+    PickerRow, SUPPORTED_THEME_VERSION, ThemeEditor, ThemeEditorRow, ThemePicker, ThemeSaveTarget,
+    ThemeSource, default_config_home, parse_hex_input, theme_editor_rows,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -183,11 +184,20 @@ impl ThemeColors {
         colors
     }
 
-    pub fn to_palette(&self, quotes: Vec<String>, source: ThemeSource, version: u64) -> Palette {
+    pub fn to_palette(
+        &self,
+        quotes: Vec<String>,
+        source: ThemeSource,
+        version: u64,
+        omarchy: Option<OmarchyChoice>,
+        overrides: BTreeSet<String>,
+    ) -> Palette {
         let mut palette = Palette::builtin();
         palette.header_quotes = quotes;
         palette.source = source;
         palette.version = version;
+        palette.omarchy = omarchy;
+        palette.overrides = overrides;
         for field in COLOR_FIELDS {
             if let Some(color) = self.get(field.key) {
                 palette.set(field.key, color_to_rgb(color));
@@ -203,6 +213,8 @@ pub struct Theme {
     pub version: u64,
     pub colors: ThemeColors,
     pub header_quotes: Vec<String>,
+    pub omarchy: Option<OmarchyChoice>,
+    pub overrides: BTreeSet<String>,
     pub app_shell: Style,
     pub body: Style,
     pub modal: Style,
@@ -240,6 +252,8 @@ impl Theme {
             version,
             colors,
             header_quotes: vec![],
+            omarchy: None,
+            overrides: BTreeSet::new(),
             app_shell: Style::default()
                 .fg(colors.text_primary)
                 .bg(colors.base_background),
@@ -376,13 +390,19 @@ pub fn theme_from_palette(palette: Palette) -> Theme {
     } else {
         palette.header_quotes
     };
+    theme.omarchy = palette.omarchy;
+    theme.overrides = palette.overrides;
     theme
 }
 
 pub fn palette_from_theme(theme: &Theme) -> Palette {
-    theme
-        .colors
-        .to_palette(theme.header_quotes.clone(), theme.source, theme.version)
+    theme.colors.to_palette(
+        theme.header_quotes.clone(),
+        theme.source,
+        theme.version,
+        theme.omarchy.clone(),
+        theme.overrides.clone(),
+    )
 }
 
 pub fn load_theme(project_root: &Path) -> Result<Theme> {
@@ -391,13 +411,26 @@ pub fn load_theme(project_root: &Path) -> Result<Theme> {
 }
 
 pub fn load_theme_with(project_root: &Path, config_home: Option<&Path>) -> Result<Theme> {
+    load_theme_resolved(project_root, config_home, &OmarchyPaths::system())
+}
+
+pub fn load_theme_resolved(
+    project_root: &Path,
+    config_home: Option<&Path>,
+    omarchy: &OmarchyPaths,
+) -> Result<Theme> {
     let palette = ldnddev_theme::load_lookup(
         project_root,
         THEME_FILE_NAME,
         config_home,
         ParseMode::Strict,
     )?;
-    Ok(theme_from_palette(palette))
+    match ldnddev_theme::apply_omarchy(&palette, omarchy) {
+        Ok(resolved) => Ok(theme_from_palette(resolved)),
+        Err(err) => Err(anyhow!(
+            "omarchy theme failed ({err}); using built-in defaults"
+        )),
+    }
 }
 
 pub fn local_theme_path(project_root: &Path) -> PathBuf {

@@ -1,9 +1,6 @@
 use crate::domain::AppState;
-use ratatui::{
-    Frame,
-    layout::Rect,
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
-};
+use ratatui::layout::Rect;
+use ratatui::Frame;
 use std::time::{Duration, Instant};
 
 pub const TOAST_DURATION: Duration = Duration::from_secs(5);
@@ -44,46 +41,29 @@ pub(crate) fn draw_toast(f: &mut Frame, state: &mut AppState, area: Rect) {
         state.pointer.toast_area = None;
         return;
     };
-    if area.width < 8 || area.height < 5 {
-        state.pointer.toast_area = None;
-        return;
-    }
-
-    let max_width = area.width.saturating_sub(2).min(50);
-    let longest_line = toast
-        .message
-        .lines()
-        .map(|line| line.chars().count() as u16)
-        .max()
-        .unwrap_or(0);
-    let width = longest_line.saturating_add(4).clamp(24, max_width);
-    let line_count = toast.message.lines().count().max(1) as u16;
-    let height = line_count
-        .saturating_add(2)
-        .clamp(3, area.height.saturating_sub(1).min(7));
-    let x = area.x + area.width.saturating_sub(width).saturating_sub(1);
-    let y = area.y + area.height.saturating_sub(height).saturating_sub(1);
-    let toast_area = Rect::new(x, y, width, height);
-    state.pointer.toast_area = Some(toast_area);
-
-    let (title, border_style) = match toast.level {
-        ToastLevel::Info => ("Info", state.theme.info),
-        ToastLevel::Success => ("Success", state.theme.valid),
-        ToastLevel::Warning => ("Warning", state.theme.warning),
-        ToastLevel::Error => ("Error", state.theme.error),
+    let colors = &state.theme.colors;
+    let kind = match toast.level {
+        ToastLevel::Info => super::toast_chrome::ToastKind::Info,
+        ToastLevel::Success => super::toast_chrome::ToastKind::Success,
+        ToastLevel::Warning => super::toast_chrome::ToastKind::Warning,
+        ToastLevel::Error => super::toast_chrome::ToastKind::Error,
     };
-
-    let text = Paragraph::new(toast.message.as_str())
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(border_style)
-                .style(state.theme.modal),
-        )
-        .style(state.theme.modal_text)
-        .wrap(Wrap { trim: true });
-
-    f.render_widget(Clear, toast_area);
-    f.render_widget(text, toast_area);
+    let areas = super::toast_chrome::render_toast_stack(
+        f,
+        area,
+        &[super::toast_chrome::ToastLine {
+            kind,
+            message: toast.message.as_str(),
+        }],
+        super::toast_chrome::ToastPaint {
+            modal_background: colors.modal_background,
+            text: colors.text_primary,
+            success: colors.success,
+            info: colors.info,
+            warning: colors.warning,
+            error: colors.error,
+        },
+        0,
+    );
+    state.pointer.toast_area = areas.into_iter().next();
 }

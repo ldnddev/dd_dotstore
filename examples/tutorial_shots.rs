@@ -123,6 +123,9 @@ fn main() -> Result<()> {
     )?;
     press(&mut app, KeyCode::Esc)?;
 
+    // This machine has Omarchy themes. Keep the shot on the hex editor.
+    app.state.omarchy_paths =
+        dd_dotstore::theme::OmarchyPaths::from_root(Path::new("/nonexistent/dd_dotstore_omarchy"));
     press(&mut app, KeyCode::F(2))?;
     capture(
         &mut app,
