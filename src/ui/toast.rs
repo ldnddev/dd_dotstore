@@ -1,6 +1,6 @@
 use crate::domain::AppState;
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
 
 pub const TOAST_DURATION: Duration = Duration::from_secs(5);
