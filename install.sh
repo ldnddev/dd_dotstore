@@ -11,6 +11,12 @@
 #
 # From a source checkout:
 #   ./install.sh
+#   ./install.sh --uninstall
+#
+# Install writes the binary, the theme, and a desktop launcher.
+# --uninstall removes those installed files. It leaves project maps and
+# your dotfiles alone. Pass the same BINDIR, PREFIX, XDG_CONFIG_HOME, and
+# XDG_DATA_HOME you used to install.
 set -euo pipefail
 
 APP_NAME="dd_dotstore"
@@ -44,14 +50,15 @@ Options:
   --debug                Source build only: cargo build without --release
   --no-build             Source build only: reuse an already-built binary
   -uninstall, --uninstall
-                         Remove the installed binary and theme
+                         Remove the installed binary, theme, and desktop launcher
   -h, --help             Show this help
 
 Environment:
   BINDIR=/path/to/bin      Install the binary into this directory.
   PREFIX=/path             Install into PREFIX/bin when BINDIR is not set.
   XDG_CONFIG_HOME=/path    Install the theme under XDG_CONFIG_HOME/ldnddev.
-  VERSION / --tag          Release tag to download (v1.6.5 or 1.6.5).
+  XDG_DATA_HOME=/path      Install the launcher under XDG_DATA_HOME/applications.
+  VERSION / --tag          Release tag to download (v1.6.6 or 1.6.6).
   REPO=owner/name          GitHub repo used for downloads and clones.
   GITHUB_TOKEN=...         Optional; raises GitHub API rate limits.
   TARGET=triple            Override the detected package target.
@@ -59,11 +66,14 @@ Environment:
 Defaults:
   BINDIR=\$HOME/.local/bin
   XDG_CONFIG_HOME=\$HOME/.config
+  Launcher                 \$HOME/.local/share/applications/${APP_NAME}.desktop
+                           when the binary is installed under your home directory.
+                           Otherwise the launcher is PREFIX/share/applications.
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --uninstall
-  curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --tag v1.6.5
+  curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --tag v1.6.6
   PREFIX=/usr/local ./install.sh
   BINDIR=/opt/bin ./install.sh --from-release
 USAGE
@@ -441,6 +451,75 @@ verify_checksum() {
   info "checksum OK"
 }
 
+# Menus search XDG_DATA_HOME, then the system data dirs. An install under
+# $HOME still publishes the launcher where the session looks.
+apps_dir() {
+  if [ -n "${XDG_DATA_HOME:-}" ]; then
+    printf '%s/applications\n' "${XDG_DATA_HOME%/}"
+    return
+  fi
+  case "$INSTALL_DIR" in
+    "$HOME" | "$HOME"/*)
+      printf '%s/.local/share/applications\n' "$HOME"
+      ;;
+    *)
+      printf '%s/share/applications\n' "$(dirname "$INSTALL_DIR")"
+      ;;
+  esac
+}
+
+# Quote one Exec argument. A literal % is a field code, so it is written as %%.
+desktop_quote() {
+  local s="$1"
+  case "$s" in
+    *$'\n'*) fail "install path contains a newline" ;;
+  esac
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//\`/\\\`}"
+  s="${s//\$/\\\$}"
+  s="${s//%/%%}"
+  printf '"%s"' "$s"
+}
+
+refresh_desktop_database() {
+  local dir="$1"
+  if [ -d "$dir" ] && command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$dir" >/dev/null 2>&1 || true
+  fi
+}
+
+install_launcher() {
+  local exec_q tmpfile
+  exec_q="$(desktop_quote "$INSTALL_DIR/$APP_NAME")"
+  mkdir -p "$DESKTOP_DIR"
+  tmpfile="$(mktemp "$DESKTOP_DIR/.${APP_NAME}.desktop.XXXXXX")"
+  if ! cat >"$tmpfile" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=${APP_NAME}
+GenericName=Dotfile manager
+Comment=Map dotfiles onto home and XDG paths
+Exec=${exec_q}
+TryExec=${INSTALL_DIR}/${APP_NAME}
+Terminal=true
+Icon=utilities-terminal
+Categories=Utility;
+Keywords=dotfiles;symlink;xdg;
+StartupNotify=false
+EOF
+  then
+    rm -f "$tmpfile"
+    fail "could not write ${DESKTOP_TARGET}"
+  fi
+  chmod 0644 "$tmpfile"
+  # mv replaces a symlink at the destination instead of writing through it.
+  mv -f "$tmpfile" "$DESKTOP_TARGET"
+  info "launcher ${DESKTOP_TARGET}"
+  refresh_desktop_database "$DESKTOP_DIR"
+}
+
 install_files() {
   local source_bin="$1"
   local source_theme="$2"
@@ -457,6 +536,8 @@ install_files() {
   mkdir -p "$THEME_DIR"
   install -m 0644 "$source_theme" "$THEME_TARGET"
 
+  install_launcher
+
   if command -v "$INSTALL_DIR/$APP_NAME" >/dev/null 2>&1; then
     info "installed $("$INSTALL_DIR/$APP_NAME" --help | head -n1)"
   else
@@ -469,6 +550,7 @@ install_files() {
       cat <<PATH_NOTE
 
 ${INSTALL_DIR} is not on your PATH.
+The desktop launcher still starts ${APP_NAME}, because it uses the full path.
 Add this line to your shell profile if you want to run ${APP_NAME} by name:
 
   export PATH="${INSTALL_DIR}:\$PATH"
@@ -817,6 +899,8 @@ fi
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 THEME_DIR="${CONFIG_HOME%/}/${THEME_DIR_NAME}"
 THEME_TARGET="$THEME_DIR/$THEME_FILE_NAME"
+DESKTOP_DIR="$(apps_dir)"
+DESKTOP_TARGET="$DESKTOP_DIR/${APP_NAME}.desktop"
 TARGET="${TARGET:-$(detect_target)}"
 
 if [ "$PRINT_TARGET" -eq 1 ]; then
@@ -853,6 +937,14 @@ if [ "$UNINSTALL" -eq 1 ]; then
     else
       info "left ${THEME_DIR} in place because it contains other files"
     fi
+  fi
+
+  if [ -e "$DESKTOP_TARGET" ] || [ -L "$DESKTOP_TARGET" ]; then
+    rm -f "$DESKTOP_TARGET"
+    info "removed ${DESKTOP_TARGET}"
+    refresh_desktop_database "$DESKTOP_DIR"
+  else
+    info "launcher not found at ${DESKTOP_TARGET}"
   fi
 
   info "done"

@@ -29,7 +29,24 @@ expect_fail() {
 }
 
 run_install() {
-  XDG_CONFIG_HOME="$1" BINDIR="$2" "$root/install.sh" --tarball "$3"
+  env -u XDG_DATA_HOME XDG_CONFIG_HOME="$1" BINDIR="$2" "$root/install.sh" --tarball "$3"
+}
+
+assert_launcher() {
+  local desktop="$1"
+  local binary="$2"
+  test -f "$desktop"
+  test ! -L "$desktop"
+  test "$(stat -c %a "$desktop")" = "644"
+  grep -q '^Type=Application$' "$desktop"
+  grep -q '^Name=dd_dotstore$' "$desktop"
+  grep -q '^Terminal=true$' "$desktop"
+  grep -q '^StartupNotify=false$' "$desktop"
+  grep -F -q "Exec=\"${binary}\"" "$desktop"
+  grep -F -q "TryExec=${binary}" "$desktop"
+  if command -v desktop-file-validate >/dev/null 2>&1; then
+    desktop-file-validate "$desktop"
+  fi
 }
 
 make_payload "$tmp/stage"
@@ -40,10 +57,98 @@ test -x "$tmp/bin/dd_dotstore"
 test -f "$tmp/cfg/ldnddev/dd_dotstore_theme.yml"
 grep -q 'version: 1' "$tmp/cfg/ldnddev/dd_dotstore_theme.yml"
 "$tmp/bin/dd_dotstore" | grep -q 'dd_dotstore-test'
+assert_launcher "$tmp/share/applications/dd_dotstore.desktop" "$tmp/bin/dd_dotstore"
 
-XDG_CONFIG_HOME="$tmp/cfg" BINDIR="$tmp/bin" "$root/install.sh" --uninstall
+env -u XDG_DATA_HOME XDG_CONFIG_HOME="$tmp/cfg" BINDIR="$tmp/bin" "$root/install.sh" --uninstall
 test ! -e "$tmp/bin/dd_dotstore"
 test ! -e "$tmp/cfg/ldnddev/dd_dotstore_theme.yml"
+test ! -e "$tmp/share/applications/dd_dotstore.desktop"
+env -u XDG_DATA_HOME XDG_CONFIG_HOME="$tmp/cfg" BINDIR="$tmp/bin" "$root/install.sh" --uninstall
+
+env -u XDG_DATA_HOME -u BINDIR -u PREFIX \
+  HOME="$tmp/home" \
+  XDG_CONFIG_HOME="$tmp/home/.config" \
+  "$root/install.sh" --tarball "$tmp/good.tar.gz"
+test -x "$tmp/home/.local/bin/dd_dotstore"
+assert_launcher \
+  "$tmp/home/.local/share/applications/dd_dotstore.desktop" \
+  "$tmp/home/.local/bin/dd_dotstore"
+env -u XDG_DATA_HOME -u BINDIR -u PREFIX \
+  HOME="$tmp/home" \
+  XDG_CONFIG_HOME="$tmp/home/.config" \
+  "$root/install.sh" --uninstall
+test ! -e "$tmp/home/.local/bin/dd_dotstore"
+test ! -e "$tmp/home/.config/ldnddev/dd_dotstore_theme.yml"
+test ! -e "$tmp/home/.local/share/applications/dd_dotstore.desktop"
+
+env -u XDG_DATA_HOME -u BINDIR \
+  HOME="$tmp/home-prefix" \
+  PREFIX="$tmp/prefix" \
+  XDG_CONFIG_HOME="$tmp/cfg-prefix" \
+  "$root/install.sh" --tarball "$tmp/good.tar.gz"
+test -x "$tmp/prefix/bin/dd_dotstore"
+assert_launcher \
+  "$tmp/prefix/share/applications/dd_dotstore.desktop" \
+  "$tmp/prefix/bin/dd_dotstore"
+env -u XDG_DATA_HOME -u BINDIR \
+  HOME="$tmp/home-prefix" \
+  PREFIX="$tmp/prefix" \
+  XDG_CONFIG_HOME="$tmp/cfg-prefix" \
+  "$root/install.sh" --uninstall
+test ! -e "$tmp/prefix/bin/dd_dotstore"
+test ! -e "$tmp/prefix/share/applications/dd_dotstore.desktop"
+test ! -e "$tmp/cfg-prefix/ldnddev/dd_dotstore_theme.yml"
+
+env -u BINDIR -u PREFIX \
+  HOME="$tmp/home-xdg" \
+  XDG_DATA_HOME="$tmp/xdg" \
+  XDG_CONFIG_HOME="$tmp/cfg-xdg" \
+  "$root/install.sh" --tarball "$tmp/good.tar.gz"
+test -x "$tmp/home-xdg/.local/bin/dd_dotstore"
+test ! -e "$tmp/home-xdg/.local/share/applications/dd_dotstore.desktop"
+assert_launcher \
+  "$tmp/xdg/applications/dd_dotstore.desktop" \
+  "$tmp/home-xdg/.local/bin/dd_dotstore"
+env -u BINDIR -u PREFIX \
+  HOME="$tmp/home-xdg" \
+  XDG_DATA_HOME="$tmp/xdg" \
+  XDG_CONFIG_HOME="$tmp/cfg-xdg" \
+  "$root/install.sh" --uninstall
+test ! -e "$tmp/xdg/applications/dd_dotstore.desktop"
+test ! -e "$tmp/home-xdg/.local/bin/dd_dotstore"
+
+env -u XDG_DATA_HOME \
+  XDG_CONFIG_HOME="$tmp/cfg-space" \
+  BINDIR="$tmp/bin dir" \
+  "$root/install.sh" --tarball "$tmp/good.tar.gz"
+assert_launcher "$tmp/share/applications/dd_dotstore.desktop" "$tmp/bin dir/dd_dotstore"
+env -u XDG_DATA_HOME \
+  XDG_CONFIG_HOME="$tmp/cfg-space" \
+  BINDIR="$tmp/bin dir" \
+  "$root/install.sh" --uninstall
+test ! -e "$tmp/bin dir/dd_dotstore"
+test ! -e "$tmp/share/applications/dd_dotstore.desktop"
+
+odd="${tmp}/odd %\$dir"
+env -u XDG_DATA_HOME \
+  XDG_CONFIG_HOME="$tmp/cfg-odd" \
+  BINDIR="$odd" \
+  "$root/install.sh" --tarball "$tmp/good.tar.gz"
+test -f "$tmp/share/applications/dd_dotstore.desktop"
+test "$(stat -c %a "$tmp/share/applications/dd_dotstore.desktop")" = "644"
+grep -F -q 'Exec="'"${tmp}"'/odd %%\$dir/dd_dotstore"' \
+  "$tmp/share/applications/dd_dotstore.desktop"
+grep -F -q "TryExec=${odd}/dd_dotstore" \
+  "$tmp/share/applications/dd_dotstore.desktop"
+if command -v desktop-file-validate >/dev/null 2>&1; then
+  desktop-file-validate "$tmp/share/applications/dd_dotstore.desktop"
+fi
+env -u XDG_DATA_HOME \
+  XDG_CONFIG_HOME="$tmp/cfg-odd" \
+  BINDIR="$odd" \
+  "$root/install.sh" --uninstall
+test ! -e "${odd}/dd_dotstore"
+test ! -e "$tmp/share/applications/dd_dotstore.desktop"
 
 mkdir -p "$tmp/nest/subdir"
 make_payload "$tmp/nest/subdir"
@@ -64,7 +169,7 @@ with tarfile.open(dest, "w:gz") as tar:
 PY
 mkdir -p "$tmp/install-tmp"
 expect_fail "not allowed" \
-  env TMPDIR="$tmp/install-tmp" XDG_CONFIG_HOME="$tmp/cfg-slip" BINDIR="$tmp/bin-slip" \
+  env -u XDG_DATA_HOME TMPDIR="$tmp/install-tmp" XDG_CONFIG_HOME="$tmp/cfg-slip" BINDIR="$tmp/bin-slip" \
   "$root/install.sh" --tarball "$tmp/slip.tar.gz"
 test ! -e "$tmp/install-tmp/escaped"
 test ! -e "$tmp/bin-slip/dd_dotstore"

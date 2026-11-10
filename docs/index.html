@@ -248,7 +248,7 @@
       <section id="install">
         <h2>Install</h2>
         <h3>From GitHub Releases (recommended)</h3>
-        <p>The installer detects Linux <code>x86_64</code> or <code>aarch64</code>, downloads the matching musl package, puts the binary in <code>~/.local/bin</code>, and copies the theme to <code>~/.config/ldnddev/dd_dotstore_theme.yml</code>. Pipe to <code>bash</code>, not <code>sh</code>.</p>
+        <p>The installer detects Linux <code>x86_64</code> or <code>aarch64</code>, downloads the matching musl package, puts the binary in <code>~/.local/bin</code>, copies the theme to <code>~/.config/ldnddev/dd_dotstore_theme.yml</code>, and adds a desktop launcher at <code>~/.local/share/applications/dd_dotstore.desktop</code>. Pipe to <code>bash</code>, not <code>sh</code>.</p>
         <p>This repository is private, so anonymous GitHub URLs 404. Use a token from <code>gh auth login</code>:</p>
         <pre><code>export GITHUB_TOKEN="$(gh auth token)"
 curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -256,7 +256,7 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
 
 # Specific release
 curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.6.5
+  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash -s -- --tag v1.6.6
 
 # Install prefix
 PREFIX=/usr/local curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -270,7 +270,7 @@ dd_dotstore --help</code></pre>
         </div>
 
         <h3>From a source checkout</h3>
-        <pre><code>./install.sh                  # release build → ~/.local/bin + theme
+        <pre><code>./install.sh                  # release build → ~/.local/bin + theme + launcher
 ./install.sh --from-release   # GitHub package even from a checkout
 ./install.sh --debug          # cargo build without --release
 XDG_CONFIG_HOME="$HOME/.config" ./install.sh</code></pre>
@@ -456,7 +456,7 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
 
 # From a source checkout
 ./install.sh --uninstall</code></pre>
-        <p>Removes the installed binary and <code>~/.config/ldnddev/dd_dotstore_theme.yml</code>. The <code>ldnddev</code> directory is removed only if it is empty. Project <code>.dd_dotstore.json</code> files and your actual dotfiles are left alone.</p>
+        <p>Removes the installed binary, <code>~/.local/share/applications/dd_dotstore.desktop</code>, and <code>~/.config/ldnddev/dd_dotstore_theme.yml</code>. The <code>ldnddev</code> directory is removed only if it is empty. Project <code>.dd_dotstore.json</code> files and your actual dotfiles are left alone. Use the same <code>BINDIR</code>, <code>PREFIX</code>, <code>XDG_CONFIG_HOME</code>, and <code>XDG_DATA_HOME</code> you used to install.</p>
       </section>
 
       <section id="screenshots">
@@ -477,7 +477,7 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
       </section>
 
       <footer class="page">
-        <p>dd_dotstore v1.6.5 · MIT License · <a href="https://github.com/ldnddev/dd_dotstore">GitHub</a></p>
+        <p>dd_dotstore v1.6.6 · MIT License · <a href="https://github.com/ldnddev/dd_dotstore">GitHub</a></p>
       </footer>
     </main>
   </div>

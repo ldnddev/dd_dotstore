@@ -20,7 +20,7 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
 dd_dotstore --help
 ```
 
-From a source checkout: `./install.sh`. Uninstall: `./install.sh --uninstall`. Full options, PATH notes, and the public-repo curl form are in the [tutorial](https://ldnddev.github.io/dd_dotstore/#install).
+From a source checkout: `./install.sh`. That installs the binary, the theme, and a desktop launcher. Uninstall: `./install.sh --uninstall` (removes those installed files). Full options, PATH notes, and the public-repo curl form are in the [tutorial](https://ldnddev.github.io/dd_dotstore/#install).
 
 ## Run
 
