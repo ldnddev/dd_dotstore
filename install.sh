@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 # Install dd_dotstore for this machine.
 #
-# Curl (public repo):
+# Curl:
 #   curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
 #
-# Private repo (needs GitHub access):
-#   export GITHUB_TOKEN="$(gh auth token)"
-#   curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-#     https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
+# GITHUB_TOKEN is optional and only needed if you hit GitHub API rate limits.
 #
 # From a source checkout:
 #   ./install.sh
