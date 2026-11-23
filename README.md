@@ -10,17 +10,17 @@ TUI to manage Linux dotfiles: pick a project folder, assign destinations, symlin
 
 The installer detects Linux `x86_64` / `aarch64` and installs the musl package from GitHub Releases plus the theme.
 
-The repo is private, so anonymous URLs 404. Use a GitHub token:
+The repo is public:
 
 ```bash
-export GITHUB_TOKEN="$(gh auth token)"
-curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_dotstore/master/install.sh | bash
 
 dd_dotstore --help
 ```
 
-From a source checkout: `./install.sh`. That installs the binary, the theme, and a desktop launcher. Uninstall: `./install.sh --uninstall` (removes those installed files). Full options, PATH notes, and the public-repo curl form are in the [tutorial](https://ldnddev.github.io/dd_dotstore/#install).
+`GITHUB_TOKEN` is optional and only needed if you hit GitHub API rate limits.
+
+From a source checkout: `./install.sh`. That installs the binary, the theme, and a desktop launcher. Uninstall: `./install.sh --uninstall` (removes those installed files). Full options and PATH notes are in the [tutorial](https://ldnddev.github.io/dd_dotstore/#install).
 
 ## Run
 
