@@ -127,10 +127,7 @@ mod cli_tests {
 
     #[test]
     fn help_and_version_do_not_become_a_root() {
-        assert_eq!(
-            parse_cli(["--help".to_string()]).unwrap(),
-            Cli::Help
-        );
+        assert_eq!(parse_cli(["--help".to_string()]).unwrap(), Cli::Help);
         assert_eq!(parse_cli(["-V".to_string()]).unwrap(), Cli::Version);
     }
 

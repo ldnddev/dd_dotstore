@@ -311,7 +311,8 @@ pub fn shortcut_line(row: &SheetRow) -> String {
 }
 
 pub fn spec(command: Command) -> &'static CommandSpec {
-    SPECS.iter()
+    SPECS
+        .iter()
         .find(|spec| spec.command == command)
         .expect("command spec")
 }

@@ -151,7 +151,10 @@ fn settings_sheet_pages_and_second_f1(cx: &mut TestAppContext) {
     press(&shell, cx, "f1");
     let body = text(&shell, cx);
     assert!(body.contains("settings-panel:right:70"), "{body}");
-    assert!(body.contains("settings-nav:Themes,Window,About,Help"), "{body}");
+    assert!(
+        body.contains("settings-nav:Themes,Window,About,Help"),
+        "{body}"
+    );
     assert!(body.contains("settings-page:Themes"), "{body}");
     assert!(
         body.contains("theme-list:flow") || body.contains("Theme color editor"),
@@ -166,7 +169,10 @@ fn settings_sheet_pages_and_second_f1(cx: &mut TestAppContext) {
     assert!(body.contains("settings-page:Window"), "{body}");
     assert!(body.contains("Density"), "{body}");
     assert!(body.contains("Vim"), "{body}");
-    assert!(body.contains("Comfortable") || body.contains("Compact"), "{body}");
+    assert!(
+        body.contains("Comfortable") || body.contains("Compact"),
+        "{body}"
+    );
 
     press(&shell, cx, "tab");
     let body = text(&shell, cx);

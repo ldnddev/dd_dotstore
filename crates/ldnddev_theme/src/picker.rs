@@ -3,7 +3,7 @@
 use crate::editor::{EditorKey, ThemeSaveTarget};
 use crate::fields::ColorField;
 use crate::omarchy::{
-    OmarchyChoice, OmarchyPaths, OmarchyTheme, discover, display_name, load_colors, map_palette,
+    discover, display_name, load_colors, map_palette, OmarchyChoice, OmarchyPaths, OmarchyTheme,
 };
 use crate::palette::Palette;
 use std::fs;

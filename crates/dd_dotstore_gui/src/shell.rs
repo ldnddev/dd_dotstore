@@ -16,9 +16,9 @@ use ldnddev_theme::{
     ThemeSaveTarget,
 };
 
-use crate::settings::{self, GuiSettings};
 #[cfg(test)]
 use crate::settings::Density;
+use crate::settings::{self, GuiSettings};
 
 const CHROME: f32 = 28.0;
 const NAV: [&str; 4] = ["Themes", "Window", "About", "Help"];
@@ -210,13 +210,23 @@ impl Shell {
     }
 
     fn command(&self, key: &str) -> Option<Command> {
-        commands::lookup(key, Surface::Gui, InputMode::Kitty, self.settings.vim_keys, self.in_text())
+        commands::lookup(
+            key,
+            Surface::Gui,
+            InputMode::Kitty,
+            self.settings.vim_keys,
+            self.in_text(),
+        )
     }
 
     fn in_text(&self) -> bool {
         self.filter_on
             || self.sheet.as_ref().is_some_and(|sheet| {
-                sheet.query_on || sheet.editor.as_ref().is_some_and(|editor| editor.editing_hex)
+                sheet.query_on
+                    || sheet
+                        .editor
+                        .as_ref()
+                        .is_some_and(|editor| editor.editing_hex)
             })
     }
 
@@ -271,7 +281,14 @@ impl Shell {
         lines.push(format!("Save to {}", target.label()));
         if let Some(editor) = &sheet.editor {
             lines.push("Theme color editor".to_string());
-            lines.push(if sheet.direct_editor { "Revert" } else { "Back" }.to_string());
+            lines.push(
+                if sheet.direct_editor {
+                    "Revert"
+                } else {
+                    "Back"
+                }
+                .to_string(),
+            );
             for (index, field) in editor.fields.iter().enumerate() {
                 let hex = editor
                     .palette
@@ -288,7 +305,11 @@ impl Shell {
         } else {
             lines.push("theme-list:flow".to_string());
             for (index, row) in sheet.picker.rows.iter().enumerate() {
-                let mark = if index == sheet.picker.selected { ">" } else { " " };
+                let mark = if index == sheet.picker.selected {
+                    ">"
+                } else {
+                    " "
+                };
                 lines.push(format!("{mark} {}", theme_row_label(row)));
             }
             lines.push("Edit colors".to_string());
@@ -307,7 +328,11 @@ impl Shell {
             ),
             format!(
                 "Reduced motion {}",
-                if self.settings.reduced_motion { "on" } else { "off" }
+                if self.settings.reduced_motion {
+                    "on"
+                } else {
+                    "off"
+                }
             ),
             "Comfortable".to_string(),
             "Compact".to_string(),
@@ -412,7 +437,11 @@ impl Shell {
             self.toggle_target();
             return;
         }
-        if self.sheet.as_ref().is_some_and(|sheet| sheet.editor.is_some()) {
+        if self
+            .sheet
+            .as_ref()
+            .is_some_and(|sheet| sheet.editor.is_some())
+        {
             self.editor_key(key);
             return;
         }
@@ -443,7 +472,10 @@ impl Shell {
             return;
         };
         if matches!(outcome, PickerOutcome::None) {
-            let preview = self.sheet.as_mut().map(|sheet| sheet.picker.preview_selected());
+            let preview = self
+                .sheet
+                .as_mut()
+                .map(|sheet| sheet.picker.preview_selected());
             if let Some(preview) = preview {
                 self.finish_picker(preview);
                 if let Some(index) = self.sheet.as_ref().map(|sheet| sheet.picker.selected) {
@@ -468,7 +500,10 @@ impl Shell {
             sheet.picker.select(next);
             next
         };
-        let preview = self.sheet.as_mut().map(|sheet| sheet.picker.preview_selected());
+        let preview = self
+            .sheet
+            .as_mut()
+            .map(|sheet| sheet.picker.preview_selected());
         if let Some(preview) = preview {
             self.finish_picker(preview);
         }
@@ -478,7 +513,10 @@ impl Shell {
     fn finish_picker(&mut self, outcome: PickerOutcome) {
         match outcome {
             PickerOutcome::Applied => {
-                let palette = self.sheet.as_ref().map(|sheet| sheet.picker.palette.clone());
+                let palette = self
+                    .sheet
+                    .as_ref()
+                    .map(|sheet| sheet.picker.palette.clone());
                 if let Some(palette) = palette {
                     self.apply_palette(palette);
                 }
@@ -660,22 +698,21 @@ impl Shell {
             }
             return;
         }
-        if let Some(index) = self
-            .sheet
-            .as_ref()
-            .and_then(|sheet| {
-                sheet
-                    .picker
-                    .rows
-                    .iter()
-                    .position(|row| theme_row_label(row) == label)
-            })
-        {
+        if let Some(index) = self.sheet.as_ref().and_then(|sheet| {
+            sheet
+                .picker
+                .rows
+                .iter()
+                .position(|row| theme_row_label(row) == label)
+        }) {
             if let Some(sheet) = self.sheet.as_mut() {
                 sheet.page = Page::Themes;
                 sheet.picker.select(index);
             }
-            let preview = self.sheet.as_mut().map(|sheet| sheet.picker.preview_selected());
+            let preview = self
+                .sheet
+                .as_mut()
+                .map(|sheet| sheet.picker.preview_selected());
             if let Some(preview) = preview {
                 self.finish_picker(preview);
             }
@@ -805,7 +842,11 @@ impl Shell {
                     app.state.theme_status =
                         dd_dotstore::theme::ThemeStatus::healthy(source, app.state.theme.version);
                 }
-                self.notice = Some(format!("Saved {} theme to {}", target.label(), path.display()));
+                self.notice = Some(format!(
+                    "Saved {} theme to {}",
+                    target.label(),
+                    path.display()
+                ));
                 self.sheet = None;
             }
             Err(err) => self.notice = Some(format!("Save failed: {err}")),
@@ -989,24 +1030,27 @@ impl Shell {
         if app.state.nodes.is_empty() {
             return;
         }
-        let next = if start {
-            0
-        } else {
-            app.state.nodes.len() - 1
-        };
+        let next = if start { 0 } else { app.state.nodes.len() - 1 };
         app.state.list_state.select(Some(next));
         self.tree_scroll.scroll_to_item(next);
     }
 
     fn choose_theme(&mut self, index: usize) {
-        if self.sheet.as_ref().is_some_and(|sheet| sheet.editor.is_some()) {
+        if self
+            .sheet
+            .as_ref()
+            .is_some_and(|sheet| sheet.editor.is_some())
+        {
             return;
         }
         if let Some(sheet) = self.sheet.as_mut() {
             sheet.page = Page::Themes;
             sheet.picker.select(index);
         }
-        let preview = self.sheet.as_mut().map(|sheet| sheet.picker.preview_selected());
+        let preview = self
+            .sheet
+            .as_mut()
+            .map(|sheet| sheet.picker.preview_selected());
         if let Some(preview) = preview {
             self.finish_picker(preview);
         }
@@ -1169,7 +1213,11 @@ impl Shell {
                     .flex()
                     .items_center()
                     .cursor_pointer()
-                    .text_color(if sheet.query_on { paint.text } else { paint.secondary })
+                    .text_color(if sheet.query_on {
+                        paint.text
+                    } else {
+                        paint.secondary
+                    })
                     .on_click(cx.listener(|shell, _: &ClickEvent, _, cx| {
                         if let Some(sheet) = shell.sheet.as_mut() {
                             sheet.query_on = true;
@@ -1341,7 +1389,10 @@ impl Shell {
                 let mut groups: Vec<(&str, Vec<String>)> = Vec::new();
                 for row in commands::shortcut_sheet() {
                     let text = commands::shortcut_line(row);
-                    if groups.last().is_some_and(|(section, _)| *section == row.section) {
+                    if groups
+                        .last()
+                        .is_some_and(|(section, _)| *section == row.section)
+                    {
                         groups.last_mut().unwrap().1.push(text);
                     } else {
                         groups.push((row.section, vec![text]));
@@ -1355,10 +1406,10 @@ impl Shell {
                         outlined(
                             section,
                             paint,
-                            div().flex().flex_col().children(
-                                rows.into_iter()
-                                    .map(|row| line(&row, paint.text)),
-                            ),
+                            div()
+                                .flex()
+                                .flex_col()
+                                .children(rows.into_iter().map(|row| line(&row, paint.text))),
                         )
                     }))
             }
@@ -1447,33 +1498,53 @@ impl Shell {
     ) -> gpui::Stateful<gpui::Div> {
         let density = self.settings.density.label();
         let vim = if self.settings.vim_keys { "on" } else { "off" };
-        let motion = if self.settings.reduced_motion { "on" } else { "off" };
+        let motion = if self.settings.reduced_motion {
+            "on"
+        } else {
+            "off"
+        };
         let rows = [
-            (0usize, format!("Density {density}"), "Comfortable spacing, or Compact."),
-            (1, format!("Vim keys {vim}"), "j k g G move lists when this is on."),
-            (2, format!("Reduced motion {motion}"), "Theme changes paint immediately."),
+            (
+                0usize,
+                format!("Density {density}"),
+                "Comfortable spacing, or Compact.",
+            ),
+            (
+                1,
+                format!("Vim keys {vim}"),
+                "j k g G move lists when this is on.",
+            ),
+            (
+                2,
+                format!("Reduced motion {motion}"),
+                "Theme changes paint immediately.",
+            ),
         ];
-        scroll.flex().flex_col().gap(px(12.0)).children(rows.map(|(index, title, detail)| {
-            let on = sheet.row == index;
-            outlined(
-                "Window",
-                paint,
-                div()
-                    .id(("window-row", index))
-                    .cursor_pointer()
-                    .when(on, |row| row.bg(paint.selected))
-                    .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
-                        if let Some(sheet) = shell.sheet.as_mut() {
-                            sheet.row = index;
-                        }
-                        shell.activate_window();
-                        cx.stop_propagation();
-                        cx.notify();
-                    }))
-                    .child(line(&title, paint.text))
-                    .child(line(detail, paint.secondary)),
-            )
-        }))
+        scroll
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .children(rows.map(|(index, title, detail)| {
+                let on = sheet.row == index;
+                outlined(
+                    "Window",
+                    paint,
+                    div()
+                        .id(("window-row", index))
+                        .cursor_pointer()
+                        .when(on, |row| row.bg(paint.selected))
+                        .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+                            if let Some(sheet) = shell.sheet.as_mut() {
+                                sheet.row = index;
+                            }
+                            shell.activate_window();
+                            cx.stop_propagation();
+                            cx.notify();
+                        }))
+                        .child(line(&title, paint.text))
+                        .child(line(detail, paint.secondary)),
+                )
+            }))
     }
 
     fn sheet_hint(&self, sheet: &Sheet) -> String {
@@ -1680,10 +1751,7 @@ fn filter_row(
 }
 
 fn line(text: &str, color: Hsla) -> gpui::Div {
-    div()
-        .w_full()
-        .text_color(color)
-        .child(text.to_string())
+    div().w_full().text_color(color).child(text.to_string())
 }
 
 fn outlined(title: &str, paint: &Paint, body: impl IntoElement) -> gpui::Div {
