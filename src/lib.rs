@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod app;
+pub mod commands;
 pub mod domain;
 pub mod input;
 pub mod scan;
@@ -9,7 +10,7 @@ pub mod ui;
 
 /// Compatibility shim: tests and older call sites use `inputs::handle_key`.
 pub mod inputs {
-    pub use crate::input::{handle_key, handle_mouse};
+    pub use crate::input::{handle_key, handle_mouse, paste_text};
 }
 
 /// Compatibility shim for one release.

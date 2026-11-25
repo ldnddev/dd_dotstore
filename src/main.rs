@@ -1,7 +1,10 @@
 use anyhow::Result;
 use crossterm::{
     ExecutableCommand,
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
+    event::{
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event,
+    },
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use dd_dotstore::app::App;
@@ -36,11 +39,15 @@ struct TerminalGuard {
     raw: bool,
     alt: bool,
     mouse: bool,
+    paste: bool,
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let mut out = stdout();
+        if self.paste {
+            let _ = out.execute(DisableBracketedPaste);
+        }
         if self.mouse {
             let _ = out.execute(DisableMouseCapture);
         }
@@ -58,12 +65,14 @@ fn run_app(project_root: Option<PathBuf>) -> Result<()> {
         raw: false,
         alt: false,
         mouse: false,
+        paste: false,
     };
     enable_raw_mode()?;
     guard.raw = true;
     stdout().execute(EnterAlternateScreen)?;
     guard.alt = true;
     guard.mouse = stdout().execute(EnableMouseCapture).is_ok();
+    guard.paste = stdout().execute(EnableBracketedPaste).is_ok();
 
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
@@ -95,6 +104,9 @@ fn run_app(project_root: Option<PathBuf>) -> Result<()> {
                 }
                 Event::FocusGained => {
                     app.state.refresh_followed_theme();
+                }
+                Event::Paste(text) => {
+                    app.paste_text(&text)?;
                 }
                 _ => {}
             }

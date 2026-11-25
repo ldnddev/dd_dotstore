@@ -447,8 +447,6 @@ fn esc_closes_common_modals() {
         .expect("find .vimrc");
 
     let modals = vec![
-        Modal::Help,
-        Modal::Credits,
         Modal::IgnoreEditor {
             selected: 0,
             draft: String::new(),
@@ -487,21 +485,30 @@ fn f2_toggles_theme_editor() {
 
     let mut app = app(&root);
     let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("open theme");
-    assert!(matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
-    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("close theme");
+    assert!(app.state.show_settings);
+    assert_eq!(app.state.settings_nav, 0);
+    assert!(app.state.theme_editor.is_some());
     assert!(app.state.modal.is_none());
+    let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("close theme");
+    assert!(!app.state.show_settings);
+    assert!(app.state.theme_editor.is_none());
 }
 
 #[test]
-fn f3_opens_and_closes_credits_modal() {
+fn f3_opens_settings_on_about() {
     let root = TempRoot::create("credits");
     fs::write(root.join(".xinitrc"), "exec awesome").expect("write dotfile");
 
     let mut app = App::new_with_root(&root).expect("app init");
-    let _ = handle_key(&mut app.state, key(KeyCode::F(3))).expect("open credits");
-    assert!(matches!(app.state.modal, Some(Modal::Credits)));
-    let _ = handle_key(&mut app.state, key(KeyCode::F(3))).expect("close credits");
+    let _ = handle_key(&mut app.state, key(KeyCode::F(3))).expect("open about");
+    assert!(app.state.show_settings);
+    assert_eq!(app.state.settings_nav, 1);
     assert!(app.state.modal.is_none());
+    let _ = handle_key(&mut app.state, key(KeyCode::F(3))).expect("stay on about");
+    assert!(app.state.show_settings);
+    assert_eq!(app.state.settings_nav, 1);
+    let _ = handle_key(&mut app.state, key(KeyCode::Esc)).expect("close");
+    assert!(!app.state.show_settings);
 }
 
 #[test]
@@ -877,13 +884,24 @@ fn esc_does_not_quit_main_view() {
 
 #[test]
 #[allow(non_snake_case)]
-fn q_and_Q_quit() {
+fn ctrl_q_quits_and_bare_q_does_not() {
     let root = TempRoot::create("q_quit");
     fs::write(root.join(".zshrc"), "export PATH=$PATH").expect("write zshrc");
 
     let mut app = App::new_with_root(&root).expect("app init");
-    assert!(handle_key(&mut app.state, key(KeyCode::Char('q'))).expect("q"));
-    assert!(handle_key(&mut app.state, key(KeyCode::Char('Q'))).expect("Q"));
+    assert!(!handle_key(&mut app.state, key(KeyCode::Char('q'))).expect("q"));
+    assert!(!handle_key(&mut app.state, key(KeyCode::Char('Q'))).expect("Q"));
+    let _ = handle_key(&mut app.state, key(KeyCode::F(1))).expect("settings");
+    assert!(app.state.show_settings);
+    assert!(!handle_key(&mut app.state, key(KeyCode::Char('q'))).expect("q in sheet"));
+    assert!(app.state.show_settings);
+    assert!(
+        handle_key(
+            &mut app.state,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)
+        )
+        .expect("ctrl+q")
+    );
 }
 
 #[test]

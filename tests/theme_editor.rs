@@ -3,13 +3,13 @@ mod common;
 use common::{TempRoot, app, key};
 use crossterm::event::KeyCode;
 use dd_dotstore::app::App;
-use dd_dotstore::domain::Modal;
 use dd_dotstore::inputs::handle_key;
 use dd_dotstore::theme::{
     COLOR_FIELDS, OmarchyChoice, OmarchyPaths, PickerRow, Theme, ThemeColors, ThemeSaveTarget,
     ThemeSource, color_from_rgb, color_to_hex, load_theme_with, nudge_channel, parse_hex_input,
     render_theme_yaml, save_theme,
 };
+use dd_dotstore::ui::settings::{PAGE_ABOUT, PAGE_HELP, PAGE_THEMES};
 use ratatui::style::Color;
 use std::fs;
 
@@ -59,36 +59,43 @@ fn f2_opens_editor_with_global_save_default() {
     fs::write(root.join(".bashrc"), "x").expect("write");
     let mut app = app(&root);
     let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("F2");
-    match &app.state.modal {
-        Some(Modal::ThemeEditor(editor)) => {
-            assert_eq!(editor.save_target, ThemeSaveTarget::Global);
-            assert!(!editor.editing_hex);
-        }
-        other => panic!("expected ThemeEditor, got {other:?}"),
-    }
+    assert!(app.state.show_settings);
+    assert_eq!(app.state.settings_nav, PAGE_THEMES);
+    assert!(app.state.modal.is_none());
+    let editor = app.state.theme_editor.as_ref().expect("editor");
+    assert_eq!(editor.save_target, ThemeSaveTarget::Global);
+    assert!(!editor.editing_hex);
 }
 
 #[test]
-fn tab_toggles_save_target_and_esc_reverts_colors() {
+fn t_toggles_save_target_and_esc_reverts_colors() {
     let root = TempRoot::create("theme_esc");
     fs::write(root.join(".bashrc"), "x").expect("write");
     let mut app = app(&root);
     let original = app.state.theme.colors;
     let _ = handle_key(&mut app.state, key(KeyCode::F(2))).expect("F2");
     let _ = handle_key(&mut app.state, key(KeyCode::Tab)).expect("tab");
-    match &app.state.modal {
-        Some(Modal::ThemeEditor(editor)) => {
-            assert_eq!(editor.save_target, ThemeSaveTarget::Local)
-        }
-        other => panic!("expected ThemeEditor, got {other:?}"),
-    }
+    assert_eq!(app.state.settings_nav, PAGE_ABOUT);
+    assert_eq!(
+        app.state.theme_editor.as_ref().expect("editor").save_target,
+        ThemeSaveTarget::Global,
+        "Tab changes page and does not toggle the save target"
+    );
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('['))).expect("back");
+    assert_eq!(app.state.settings_nav, PAGE_THEMES);
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('t'))).expect("target");
+    assert_eq!(
+        app.state.theme_editor.as_ref().expect("editor").save_target,
+        ThemeSaveTarget::Local
+    );
     let _ = handle_key(&mut app.state, key(KeyCode::Char('l'))).expect("nudge");
     assert_ne!(
         app.state.theme.colors.base_background,
         original.base_background
     );
     let _ = handle_key(&mut app.state, key(KeyCode::Esc)).expect("esc");
-    assert!(app.state.modal.is_none());
+    assert!(!app.state.show_settings);
+    assert!(app.state.theme_editor.is_none());
     assert_eq!(app.state.theme.colors, original);
 }
 
@@ -157,7 +164,8 @@ fn reset_restores_builtin_colors_without_closing() {
         ThemeColors::default().base_background
     );
     let _ = handle_key(&mut app.state, key(KeyCode::Char('R'))).expect("reset");
-    assert!(matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
+    assert!(app.state.show_settings);
+    assert!(app.state.theme_editor.is_some());
     assert_eq!(app.state.theme.colors, ThemeColors::default());
 }
 
@@ -185,7 +193,17 @@ fn f2_lists_omarchy_themes_and_esc_reverts() {
         picker.rows.get(picker.selected),
         Some(PickerRow::Custom)
     ));
-    assert!(matches!(app.state.modal, Some(Modal::ThemePicker)));
+    assert!(app.state.show_settings);
+    assert!(app.state.modal.is_none());
+    assert!(app.state.theme_editor.is_none());
+
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('k'))).expect("preview up");
+    assert_eq!(
+        color_to_hex(app.state.theme.colors.body_background),
+        "#1A1B26"
+    );
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('j'))).expect("preview back");
+    assert_eq!(color_to_hex(app.state.theme.colors.body_background), before);
 
     let _ = handle_key(&mut app.state, key(KeyCode::Enter)).expect("enter custom");
     assert_eq!(color_to_hex(app.state.theme.colors.body_background), before);
@@ -199,11 +217,12 @@ fn f2_lists_omarchy_themes_and_esc_reverts() {
     assert_eq!(app.state.theme.omarchy, Some(OmarchyChoice::Follow));
 
     let _ = handle_key(&mut app.state, key(KeyCode::Char('e'))).expect("edit");
-    assert!(matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
+    assert!(app.state.theme_editor.is_some());
     assert!(app.state.theme_picker.is_some());
 
     let _ = handle_key(&mut app.state, key(KeyCode::Esc)).expect("back");
-    assert!(matches!(app.state.modal, Some(Modal::ThemePicker)));
+    assert!(app.state.theme_editor.is_none());
+    assert!(app.state.show_settings);
     assert!(app.state.theme_picker.is_some());
     assert_eq!(
         color_to_hex(app.state.theme.colors.body_background),
@@ -211,8 +230,38 @@ fn f2_lists_omarchy_themes_and_esc_reverts() {
     );
 
     let _ = handle_key(&mut app.state, key(KeyCode::Esc)).expect("close");
-    assert!(app.state.modal.is_none());
+    assert!(!app.state.show_settings);
     assert!(app.state.theme_picker.is_none());
+    assert!(app.state.theme_editor.is_none());
     assert_eq!(color_to_hex(app.state.theme.colors.body_background), before);
     assert!(app.state.theme.omarchy.is_none());
+}
+
+#[test]
+fn f1_toggles_settings_and_second_press_reverts() {
+    let root = TempRoot::create("theme_f1");
+    fs::write(root.join(".bashrc"), "x").expect("write");
+    let mut app = app(&root);
+    let original = app.state.theme.colors;
+    let _ = handle_key(&mut app.state, key(KeyCode::F(1))).expect("open");
+    assert!(app.state.show_settings);
+    assert_eq!(app.state.settings_nav, PAGE_THEMES);
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('l'))).expect("nudge");
+    assert_ne!(
+        app.state.theme.colors.base_background,
+        original.base_background
+    );
+    let _ = handle_key(&mut app.state, key(KeyCode::Tab)).expect("about");
+    let _ = handle_key(&mut app.state, key(KeyCode::Tab)).expect("help");
+    assert_eq!(app.state.settings_nav, PAGE_HELP);
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('j'))).expect("scroll");
+    let _ = handle_key(&mut app.state, key(KeyCode::Esc)).expect("close help");
+    assert!(!app.state.show_settings);
+    assert_eq!(app.state.theme.colors, original);
+
+    let _ = handle_key(&mut app.state, key(KeyCode::F(1))).expect("open again");
+    let _ = handle_key(&mut app.state, key(KeyCode::Char('l'))).expect("nudge");
+    let _ = handle_key(&mut app.state, key(KeyCode::F(1))).expect("close");
+    assert!(!app.state.show_settings);
+    assert_eq!(app.state.theme.colors, original);
 }

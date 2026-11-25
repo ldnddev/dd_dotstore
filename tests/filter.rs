@@ -15,6 +15,17 @@ fn node_paths(state: &dd_dotstore::state::AppState) -> Vec<PathBuf> {
 }
 
 #[test]
+fn bracketed_paste_is_one_insert_in_the_filter() {
+    let root = TempRoot::create("paste_filter");
+    let mut app = App::new_with_root(&root).expect("app init");
+    app.handle_key(key(KeyCode::Char('/'))).expect("filter");
+    assert!(app.state.filter_editing);
+    app.paste_text("ab\r\ncd\u{1b}e").expect("paste");
+    assert_eq!(app.state.filter, "abcde");
+    assert!(app.state.filter_editing);
+}
+
+#[test]
 fn source_filter_uses_fuzzy_matching() {
     let root = TempRoot::create("source_fuzzy");
     fs::write(root.join("alpha.toml"), "x=1").expect("write alpha");

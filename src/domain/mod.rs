@@ -35,8 +35,6 @@ pub enum Modal {
         selected: usize,
         draft: String,
     },
-    Help,
-    Credits,
     ImportPicker {
         files: Vec<PathBuf>,
         selected: usize,
@@ -59,10 +57,6 @@ pub enum Modal {
         selected: usize,
         scroll: usize,
     },
-    ThemeEditor(ThemeEditor),
-    /// Omarchy list. The picker state lives on [`AppState`] so this slot can
-    /// switch to the hex editor without dropping the list.
-    ThemePicker,
 }
 
 #[derive(Clone, Debug)]
@@ -178,6 +172,8 @@ pub struct PointerState {
     pub scrollbar_dragging: bool,
     pub last_mouse_click_pos: Option<(u16, u16, Instant)>,
     pub destination_paths: Vec<PathBuf>,
+    /// Settings nav column, captured while the sheet is drawn.
+    pub settings_nav_area: Rect,
     /// Source path whose saved destination was last scrolled into view.
     /// Wheel-scrolling Destinations does not clear this, so the offset stays
     /// put until the source cursor moves.
@@ -207,8 +203,16 @@ pub struct AppState {
     pub persist_retry_at: Option<Instant>,
     pub last_save_error: Option<String>,
     pub theme_status: ThemeStatus,
-    /// Kept beside [`Modal`] so the hex editor can open without dropping the list.
+    /// Right-half Settings sheet. Themes, About, then Help.
+    pub show_settings: bool,
+    pub settings_nav: u8,
+    pub help_scroll: u16,
+    pub help_scroll_max: u16,
+    /// Keep the highlighted theme row on screen after j/k.
+    pub settings_follow: bool,
+    /// Omarchy list. The hex editor can open without dropping the list.
     pub theme_picker: Option<ThemePicker>,
+    pub theme_editor: Option<ThemeEditor>,
     pub omarchy_paths: OmarchyPaths,
     /// Stamp of the followed desktop theme file. Compared on focus gain.
     pub follow_stamp: Option<String>,
@@ -240,7 +244,13 @@ impl Default for AppState {
             persist_retry_at: None,
             last_save_error: None,
             theme_status: ThemeStatus::default(),
+            show_settings: false,
+            settings_nav: 0,
+            help_scroll: 0,
+            help_scroll_max: 0,
+            settings_follow: false,
             theme_picker: None,
+            theme_editor: None,
             omarchy_paths: OmarchyPaths::system(),
             follow_stamp: None,
             pointer: PointerState::default(),
@@ -283,10 +293,6 @@ impl AppState {
     }
 
     pub fn theme_ui_open(&self) -> bool {
-        self.theme_picker.is_some()
-            || matches!(
-                self.modal,
-                Some(Modal::ThemeEditor(_)) | Some(Modal::ThemePicker)
-            )
+        self.show_settings
     }
 }

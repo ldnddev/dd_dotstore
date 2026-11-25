@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{
     domain::{Action, AppState, PERSIST_IDLE, load},
-    input::{handle_key, handle_mouse},
+    input::{handle_key, handle_mouse, paste_text},
     theme::{OmarchyChoice, Theme, ThemeStatus, load_theme_resolved},
     tree::{AssignmentSource, rebuild_tree},
     ui::draw,
@@ -72,6 +72,10 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Result<bool> {
         handle_key(&mut self.state, key)
+    }
+
+    pub fn paste_text(&mut self, raw: &str) -> Result<()> {
+        paste_text(&mut self.state, raw)
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Result<bool> {

@@ -20,7 +20,7 @@ dd_dotstore --help
 
 `GITHUB_TOKEN` is optional and only needed if you hit GitHub API rate limits.
 
-From a source checkout: `./install.sh`. That installs the binary, the theme, and a desktop launcher. Uninstall: `./install.sh --uninstall` (removes those installed files). Full options and PATH notes are in the [tutorial](https://ldnddev.github.io/dd_dotstore/#install).
+From a source checkout: `./install.sh`. That asks for the terminal, the window, or both. Uninstall asks the same question and leaves the theme file. Full options and PATH notes are in the [tutorial](https://ldnddev.github.io/dd_dotstore/#install).
 
 ## Run
 

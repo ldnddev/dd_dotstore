@@ -1,6 +1,7 @@
 mod destinations;
 mod focus;
 mod modals;
+pub mod settings;
 mod source;
 pub mod toast;
 mod toast_chrome;
@@ -11,9 +12,11 @@ use modals::draw_modal;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    text::Line,
+    style::{Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
+use settings::draw_settings;
 use source::draw_source_panel;
 use toast::draw_toast;
 
@@ -27,14 +30,15 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     if state.modal.is_none() {
         state.pointer.current_modal_area = None;
     }
+    state.pointer.settings_nav_area = Rect::default();
     f.render_widget(Block::default().style(state.theme.app_shell), f.area());
 
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4), // quote plus the focus line
+            Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(1), // footer is now just the key hints line (decluttered)
+            Constraint::Length(1),
         ])
         .split(f.area());
 
@@ -49,6 +53,10 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     draw_status_panel(f, state, chunks[1]);
     draw_status_bar(f, state, outer[2]);
 
+    if state.show_settings {
+        draw_settings(f, state, outer[1]);
+    }
+
     if state.modal.is_some() {
         draw_modal(f, state, f.area());
     }
@@ -60,35 +68,92 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
 fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
     let inner_width = area.width.saturating_sub(2) as usize;
-    let lines = vec![
-        Line::from(state.header_copy.as_str()),
-        focus::focus_header_line(state, inner_width),
-    ];
-    let header = Paragraph::new(lines).block(
-        Block::default()
-            .title("dd_dotstore")
-            .borders(Borders::ALL)
-            .border_style(state.theme.active_border)
-            .style(state.theme.app_shell),
-    );
+    let name = Line::from(Span::styled(
+        " dd_dotstore ",
+        Style::default()
+            .fg(state.theme.colors.text_primary)
+            .add_modifier(Modifier::BOLD),
+    ))
+    .left_aligned();
+    let mut block = Block::default()
+        .title(name)
+        .borders(Borders::ALL)
+        .border_style(state.theme.active_border)
+        .style(state.theme.app_shell);
+    let quote_budget = area.width.saturating_sub(16).saturating_sub(2) as usize;
+    if quote_budget >= 4 && !state.header_copy.is_empty() {
+        let quote = ellipsize_end(&state.header_copy, quote_budget);
+        block = block.title(
+            Line::from(Span::styled(
+                format!(" {quote} "),
+                Style::default().fg(state.theme.colors.text_secondary),
+            ))
+            .right_aligned(),
+        );
+    }
+    let header = Paragraph::new(focus::focus_header_line(state, inner_width)).block(block);
     f.render_widget(header, area);
 }
 
 fn draw_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
-    // Width-adaptive key hints (footer reduced to 1 line; theme status moved out of persistent footer
-    // to reduce clutter — full details still in F2 Theme / F3 Credits and at startup).
-    let keys = if area.width < 75 {
-        "F1:Help  q:Quit  j/k:Nav  Spc:Sel  s:Apply  x:Rem  /:Filter"
-    } else if area.width < 110 {
-        "F1: Help   /: Search   Space: Select   m/M: Link/Copy   s: Apply   x: Remove   q: Quit"
-    } else {
-        "F1: Help   F2: Theme   t: Group   A: Adopt   D: Doctor   s: Apply   q: Quit   (mouse: click/scroll/drag)"
-    };
-
-    let bar = Paragraph::new(Line::from(keys))
+    let bar = Paragraph::new(Line::from(footer_hint(state, area.width)))
         .block(Block::default())
         .style(state.theme.app_shell);
     f.render_widget(bar, area);
+}
+
+/// One footer row. Drops middle hints from the right when `width` is tight.
+/// F1 and quit stay.
+pub(crate) fn footer_hint(state: &AppState, width: u16) -> String {
+    if state.show_settings || state.modal.is_some() {
+        return if width < 80 {
+            "F1:Settings  Esc:Close  ^Q:Quit".to_string()
+        } else {
+            "F1: Settings  Esc: Close  Ctrl+Q: Quit".to_string()
+        };
+    }
+    let (f1, quit) = if width < 80 {
+        ("F1:Settings", "^Q:Quit")
+    } else {
+        ("F1: Settings", "Ctrl+Q: Quit")
+    };
+    let middle: &[&str] = if width < 80 {
+        &["j/k:Nav", "Spc:Sel", "s:Apply", "/:Filter"]
+    } else {
+        &["j/k: Move", "Space: Select", "s: Apply", "/: Filter"]
+    };
+    fit_footer(width, &[f1], middle, &[quit])
+}
+
+fn fit_footer(width: u16, left: &[&str], middle: &[&str], right: &[&str]) -> String {
+    let limit = width as usize;
+    let mut mid: Vec<&str> = middle.to_vec();
+    loop {
+        let mut parts = Vec::with_capacity(left.len() + mid.len() + right.len());
+        parts.extend_from_slice(left);
+        parts.extend(mid.iter().copied());
+        parts.extend_from_slice(right);
+        let line = parts.join("  ");
+        if line.chars().count() <= limit || mid.is_empty() {
+            return line;
+        }
+        mid.pop();
+    }
+}
+
+fn ellipsize_end(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    if max == 1 {
+        return "…".to_string();
+    }
+    let mut out: String = text.chars().take(max - 1).collect();
+    out.push('…');
+    out
 }
 
 pub(crate) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -113,7 +178,7 @@ pub(crate) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
-    use super::draw;
+    use super::{draw, footer_hint};
     use crate::domain::{ActionMode, AppState, Node, NodeKind, SymlinkStatus};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -166,7 +231,7 @@ mod tests {
             .draw(|frame| draw(frame, &mut state))
             .expect("draw");
 
-        let focus = row_text(terminal.backend().buffer(), 2);
+        let focus = row_text(terminal.backend().buffer(), 1);
         assert!(
             focus.contains("file7.txt"),
             "focus line should name the highlighted source: {focus:?}"
@@ -181,7 +246,7 @@ mod tests {
         );
         assert_eq!(
             state.status_list_state.offset(),
-            3,
+            2,
             "the matching destination starts below the fold and should scroll up"
         );
         let selected_fg = state.theme.colors.text_active_focus;
@@ -207,7 +272,7 @@ mod tests {
         terminal
             .draw(|frame| draw(frame, &mut state))
             .expect("draw");
-        let suggested = row_text(terminal.backend().buffer(), 2);
+        let suggested = row_text(terminal.backend().buffer(), 1);
         assert!(
             suggested.contains("suggested (not saved)"),
             "an unsaved row should not look mapped: {suggested:?}"
@@ -215,6 +280,85 @@ mod tests {
         assert!(
             !suggested.contains("  linked"),
             "unsaved status must replace linked: {suggested:?}"
+        );
+    }
+
+    #[test]
+    fn footer_starts_with_settings_and_ends_with_ctrl_q() {
+        let state = AppState::default_with_root(PathBuf::from("/tmp/dd-dots"));
+        let narrow = footer_hint(&state, 79);
+        assert!(narrow.starts_with("F1:Settings"), "{narrow}");
+        assert!(narrow.ends_with("^Q:Quit"), "{narrow}");
+        assert!(narrow.contains("j/k:Nav"), "{narrow}");
+        let wide = footer_hint(&state, 80);
+        assert!(wide.starts_with("F1: Settings"), "{wide}");
+        assert!(wide.ends_with("Ctrl+Q: Quit"), "{wide}");
+        assert!(wide.contains("j/k: Move"), "{wide}");
+        assert!(
+            !wide.contains("q:Quit") && !wide.contains("q: Quit"),
+            "{wide}"
+        );
+        assert!(
+            !wide.contains("F1:Help") && !wide.contains("F1: Help"),
+            "{wide}"
+        );
+        assert!(!wide.contains("F2"), "{wide}");
+        let tight = footer_hint(&state, 20);
+        assert_eq!(tight, "F1:Settings  ^Q:Quit");
+    }
+
+    #[test]
+    fn footer_names_esc_while_the_sheet_or_a_modal_is_open() {
+        let mut state = AppState::default_with_root(PathBuf::from("/tmp/dd-dots"));
+        state.show_settings = true;
+        assert_eq!(footer_hint(&state, 40), "F1:Settings  Esc:Close  ^Q:Quit");
+        assert_eq!(
+            footer_hint(&state, 80),
+            "F1: Settings  Esc: Close  Ctrl+Q: Quit"
+        );
+        state.show_settings = false;
+        state.modal = Some(crate::domain::Modal::IgnoreEditor {
+            selected: 0,
+            draft: String::new(),
+        });
+        assert_eq!(footer_hint(&state, 79), "F1:Settings  Esc:Close  ^Q:Quit");
+    }
+
+    #[test]
+    fn settings_sheet_covers_only_the_right_half() {
+        let mut state = AppState::default_with_root(PathBuf::from("/tmp/dd-dots"));
+        state.header_copy = "Don't Fear the . (Dot) - Tame It.".into();
+        state.tree = vec![saved_file("file0.txt")];
+        state.nodes = state.tree.clone();
+        state.list_state.select(Some(0));
+        state.show_settings = true;
+
+        let backend = TestBackend::new(80, 16);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| draw(frame, &mut state))
+            .expect("draw");
+        let buf = terminal.backend().buffer().clone();
+        let top = row_text(&buf, 3);
+        assert!(
+            top.contains("Settings"),
+            "sheet title sits on the body band: {top:?}"
+        );
+        let themes = row_text(&buf, 4);
+        let about = row_text(&buf, 5);
+        let help = row_text(&buf, 6);
+        assert!(
+            themes.contains("> Themes"),
+            "selected nav row is > Themes: {themes:?}"
+        );
+        assert!(about.contains("About"), "{about:?}");
+        assert!(help.contains("Help"), "{help:?}");
+        let left: String = (0..40)
+            .map(|x| buf.cell((x, 4)).map(|cell| cell.symbol()).unwrap_or(""))
+            .collect();
+        assert!(
+            left.contains("file0.txt"),
+            "the body under the left half stays visible: {left:?}"
         );
     }
 }

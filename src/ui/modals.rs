@@ -1,8 +1,4 @@
 use crate::domain::{AppState, BulkAction, Conflict, DoctorSeverity, Modal};
-use crate::theme::{
-    PickerRow, ThemeEditorRow, ThemePicker, color_from_rgb, color_rgb, color_to_hex,
-    theme_editor_rows,
-};
 use crate::ui::centered_rect;
 use ratatui::{
     Frame,
@@ -38,14 +34,7 @@ fn preview_overwrite_counts(lines: &[String]) -> (usize, usize, usize) {
 }
 
 pub(crate) fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let modal_area = if matches!(
-        state.modal,
-        Some(Modal::ThemeEditor(_)) | Some(Modal::ThemePicker)
-    ) {
-        centered_rect(80, 80, area)
-    } else {
-        centered_rect(70, 60, area)
-    };
+    let modal_area = centered_rect(70, 60, area);
     state.pointer.current_modal_area = Some(modal_area);
     f.render_widget(Clear, modal_area);
 
@@ -218,87 +207,6 @@ pub(crate) fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
                 );
                 f.render_widget(text, modal_area);
             }
-            Modal::Help => {
-                let help = "Keybindings\n\
-\n\
-q / Q        Quit\n\
-Esc          Close modal / clear filter / clear selection (does not quit)\n\
-F1           Toggle help\n\
-F2           Omarchy themes (Enter apply, e edit, s save)\n\
-F3           Toggle credits\n\
-j/k or ↑/↓   Navigate\n\
-Space        Toggle selection (file/folder)\n\
-Enter        Edit destination (file/folder)\n\
-e            Edit destination (file/folder)\n\
-h/l or ←/→   Collapse/expand folder\n\
-s / p        Plan apply (highlight or checkboxes; Y applies)\n\
-x            Plan remove (highlight or checkboxes; Y applies)\n\
-m            Toggle LINK/COPY for highlighted item\n\
-M            Set selected items to the next LINK/COPY mode\n\
-t            Set group on highlight or checkboxes\n\
-T            Select every item in the highlight's group\n\
-A            Reverse-import HOME/XDG symlinks that point at this project\n\
-D            Doctor: broken, planned, unknown, and orphan links\n\
-u            Undo last action\n\
-/            Focus source filter (does not clear; also matches group names)\n\
-r            Reload tree\n\
-I            Ignore editor (list / add / delete, persisted)\n\
-i            Import picker\n\
-E            Export picker\n\
-\n\
-Mouse\n\
-Click row           Highlight\n\
-Far-left click      Toggle [ ] select\n\
-Click tree area     Toggle expand (folders)\n\
-Shift+click         Range multi-select from current to clicked\n\
-Double-click name   Edit destination\n\
-Wheel over list     Scroll source (Shift=faster)\n\
-Wheel over right    Scroll Destinations\n\
-Drag right scrollbar Scroll the view\n\
-Click right panel   Jump focus + auto-expand ancestors\n\
-Click outside modal Close it\n\
-Click inside a confirm/overwrite/plan dialog does nothing — use Y\n\
-Browser: click moves, double-click picks, scrollbar drag works\n\
-\n\
-Tree: proper connectors (├ └ │) + counts + subtree badges (●) for density.\n\
-○ planned dest (assigned, not on disk). Unassigned rows show dim → dest.";
-                let text = Paragraph::new(help)
-                    .block(
-                        Block::default()
-                            .title("Help")
-                            .borders(Borders::ALL)
-                            .border_style(state.theme.active_border)
-                            .style(state.theme.modal),
-                    )
-                    .style(state.theme.modal_text);
-                f.render_widget(text, modal_area);
-            }
-            Modal::Credits => {
-                let credits = format!(
-                    "Credits\n\
-\n\
-- GNU Stow: dotfile workflow inspiration\n\
-- Ratatui + Crossterm: TUI stack\n\
-\n\
-Theme source: {}\n\
-Theme status: {}\n\
-\n\
-F2 opens Omarchy themes (Enter apply, e edit, s save; default save: global).\n\
-Press Esc/F3 to close.",
-                    state.theme.source.label(),
-                    state.theme_status.message
-                );
-                let text = Paragraph::new(credits)
-                    .block(
-                        Block::default()
-                            .title("Credits")
-                            .borders(Borders::ALL)
-                            .border_style(state.theme.active_border)
-                            .style(state.theme.modal),
-                    )
-                    .style(state.theme.modal_text);
-                f.render_widget(text, modal_area);
-            }
             Modal::ImportPicker { files, selected } => {
                 let items: Vec<ListItem<'_>> = files
                     .iter()
@@ -436,132 +344,6 @@ Press Esc/F3 to close.",
                 );
                 f.render_widget(text, modal_area);
             }
-            Modal::ThemePicker => {
-                if let Some(picker) = state.theme_picker.clone() {
-                    draw_theme_picker(f, &state.theme, modal_area, &picker);
-                }
-            }
-            Modal::ThemeEditor(editor) => {
-                let rows = theme_editor_rows(&editor.fields);
-                let channel = ["R", "G", "B"][editor.channel.min(2)];
-                let target = editor.save_target.label().to_uppercase();
-                let esc = if state.theme_picker.is_some() {
-                    "Esc back"
-                } else {
-                    "Esc revert"
-                };
-                let mut lines: Vec<Line<'_>> = vec![
-                    Line::from(format!(
-                        "Save: {target} (Tab)   Channel: {channel} ([/])   Y save   R reset   {esc}"
-                    )),
-                    Line::from(if editor.editing_hex {
-                        format!("Hex: {}█   Enter apply   Esc cancel edit", editor.hex_draft)
-                    } else {
-                        format!(
-                            "Hex: {}   Enter to type   +/- or h/l nudge",
-                            editor.hex_draft
-                        )
-                    }),
-                    Line::from(""),
-                ];
-                let view_h = modal_area.height.saturating_sub(6) as usize;
-                let start = rows
-                    .iter()
-                    .position(|row| match row {
-                        ThemeEditorRow::Color(idx) => *idx >= editor.scroll,
-                        ThemeEditorRow::Header(_) => false,
-                    })
-                    .unwrap_or(0);
-                let start = if start > 0 && matches!(rows[start - 1], ThemeEditorRow::Header(_)) {
-                    start - 1
-                } else {
-                    start
-                };
-                for row in rows.iter().skip(start).take(view_h.max(1)) {
-                    match row {
-                        ThemeEditorRow::Header(name) => {
-                            lines.push(Line::from(Span::styled(
-                                format!(" {name}"),
-                                state.theme.modal_label,
-                            )));
-                        }
-                        ThemeEditorRow::Color(idx) => {
-                            let field = editor.fields[*idx];
-                            let color = editor
-                                .palette
-                                .get(field.key)
-                                .map(color_from_rgb)
-                                .unwrap_or(ratatui::style::Color::Black);
-                            let hex = color_to_hex(color);
-                            let (r, g, b) = color_rgb(color);
-                            let cursor = if *idx == editor.selected { ">" } else { " " };
-                            let style = if *idx == editor.selected {
-                                state.theme.selected
-                            } else {
-                                state.theme.modal_text
-                            };
-                            lines.push(Line::from(vec![
-                                Span::styled(format!("{cursor} "), style),
-                                Span::styled("██ ", ratatui::style::Style::default().fg(color)),
-                                Span::styled(
-                                    format!("{:<22} {hex}  {r:3},{g:3},{b:3}", field.key),
-                                    style,
-                                ),
-                            ]));
-                        }
-                    }
-                }
-                let text = Paragraph::new(lines).block(
-                    Block::default()
-                        .title("F2 Theme editor")
-                        .borders(Borders::ALL)
-                        .border_style(state.theme.input_border_focus)
-                        .style(state.theme.modal),
-                );
-                f.render_widget(text, modal_area);
-            }
         }
     }
-}
-
-fn draw_theme_picker(f: &mut Frame, theme: &crate::theme::Theme, area: Rect, picker: &ThemePicker) {
-    let mut lines = vec![
-        Line::from(format!(
-            "Save: {} (Tab)    Enter apply    e edit colors    s save    Esc revert",
-            picker.save_target.label()
-        )),
-        Line::from(""),
-    ];
-    let view_h = area.height.saturating_sub(5) as usize;
-    for (idx, row) in picker
-        .rows
-        .iter()
-        .enumerate()
-        .skip(picker.scroll)
-        .take(view_h.max(1))
-    {
-        let (label, detail) = match row {
-            PickerRow::Follow { name } => ("Follow desktop".to_string(), name.clone()),
-            PickerRow::Theme(theme) => (theme.name.clone(), theme.mode.label().to_string()),
-            PickerRow::Custom => ("Custom".to_string(), "built-in".to_string()),
-        };
-        let cursor = if idx == picker.selected { ">" } else { " " };
-        let style = if idx == picker.selected {
-            theme.selected
-        } else {
-            theme.modal_text
-        };
-        lines.push(Line::from(Span::styled(
-            format!("{cursor} {label:<22} {detail}"),
-            style,
-        )));
-    }
-    let text = Paragraph::new(lines).block(
-        Block::default()
-            .title("F2 Themes")
-            .borders(Borders::ALL)
-            .border_style(theme.input_border_focus)
-            .style(theme.modal),
-    );
-    f.render_widget(text, area);
 }

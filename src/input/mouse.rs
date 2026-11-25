@@ -2,14 +2,14 @@ use anyhow::Result;
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::time::Instant;
 
-use crate::actions::{
-    assign_destination, collect_preview_lines, escape_theme, theme_editor_select,
-};
+use crate::actions::{assign_destination, collect_preview_lines};
 use crate::domain::{AppState, Modal, NodeKind};
 use crate::input::hit_test::{
     hit_test_source_row, is_over_scrollbar, rect_contains, zones_for_node,
 };
-use crate::input::keys::{open_dest_browser_for_idx, selected_rel_path};
+use crate::input::keys::{
+    open_dest_browser_for_idx, scroll_settings, selected_rel_path, settings_nav_click,
+};
 use crate::tree::{find_mut_node, flatten_visible, toggle_expand, toggle_selected};
 use crate::ui::toast::ToastLevel;
 
@@ -32,7 +32,23 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
         return handle_modal_mouse(state, mouse);
     }
 
+    if state.show_settings {
+        return handle_settings_mouse(state, mouse);
+    }
+
     handle_main_mouse(state, mouse)
+}
+
+fn handle_settings_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => scroll_settings(state, -3),
+        MouseEventKind::ScrollDown => scroll_settings(state, 3),
+        MouseEventKind::Down(MouseButton::Left) => {
+            let _ = settings_nav_click(state, mouse.column, mouse.row);
+        }
+        _ => {}
+    }
+    Ok(false)
 }
 
 fn handle_main_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
@@ -296,12 +312,8 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
 
     let inside_modal = rect_contains(modal_area, mouse.column, mouse.row);
     if !inside_modal {
-        // Outside click cancels the modal (Esc semantics for most)
-        if state.theme_ui_open() {
-            escape_theme(state);
-        } else {
-            state.modal = None;
-        }
+        // Outside click cancels the modal. The Settings sheet is not a modal.
+        state.modal = None;
         return Ok(false);
     }
 
@@ -519,38 +531,7 @@ fn handle_modal_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             // Mis-click must neither apply nor dismiss a dialog that can remove_dir_all.
         }
 
-        // For help/credits/ignore/export: inside click does nothing special, outside cancelled
-        Some(Modal::ThemeEditor(editor)) => {
-            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                let content_top = modal_area.y + 4;
-                if mouse.row >= content_top {
-                    let rel = (mouse.row - content_top) as usize;
-                    let rows = crate::theme::theme_editor_rows(&editor.fields);
-                    let start = rows
-                        .iter()
-                        .position(|row| match row {
-                            crate::theme::ThemeEditorRow::Color(idx) => *idx >= editor.scroll,
-                            crate::theme::ThemeEditorRow::Header(_) => false,
-                        })
-                        .unwrap_or(0);
-                    let start = if start > 0
-                        && matches!(rows[start - 1], crate::theme::ThemeEditorRow::Header(_))
-                    {
-                        start - 1
-                    } else {
-                        start
-                    };
-                    if let Some(crate::theme::ThemeEditorRow::Color(idx)) = rows.get(start + rel) {
-                        theme_editor_select(state, *idx);
-                    }
-                }
-            }
-        }
-
-        Some(Modal::ThemePicker)
-        | Some(Modal::IgnoreEditor { .. })
-        | Some(Modal::Help)
-        | Some(Modal::Credits)
+        Some(Modal::IgnoreEditor { .. })
         | Some(Modal::ExportPicker { .. })
         | Some(Modal::GroupEditor { .. }) => {
             // no special mouse row logic

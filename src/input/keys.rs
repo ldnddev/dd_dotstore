@@ -4,27 +4,101 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::actions::{
     action_targets, apply_adopt_candidates, apply_group_name, apply_live_theme_editor,
     apply_live_theme_picker, assign_destination, collect_preview_lines, confirm_bulk,
-    confirm_bulk_with_overwrite, escape_theme, export_to_path, import_from_path,
-    jump_to_doctor_source, open_adopt_picker, open_doctor, open_export_picker, open_group_editor,
-    open_import_picker, open_theme_editor, save_theme_editor, select_group_of_highlight,
-    selected_create_conflicts, undo_last,
+    confirm_bulk_with_overwrite, export_to_path, import_from_path, jump_to_doctor_source,
+    open_about, open_adopt_picker, open_doctor, open_export_picker, open_group_editor,
+    open_import_picker, save_theme_editor, select_group_of_highlight, selected_create_conflicts,
+    step_back_theme_editor, toggle_settings, undo_last,
 };
 use crate::domain::{AppState, BrowserState, BulkAction, Modal, Node, NodeKind};
 use crate::theme::{EditorKey, EditorOutcome, PickerOutcome, ThemeEditor};
 use crate::tree::{
     AssignmentSource, find_mut_node, flatten_visible, rebuild_tree, toggle_expand, toggle_selected,
 };
+use crate::ui::settings::{NAV, PAGE_ABOUT, PAGE_HELP, PAGE_LAST, PAGE_THEMES};
 use crate::ui::toast::ToastLevel;
 use std::path::PathBuf;
 
+fn is_quit_key(key: &KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q'))
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// Bracketed paste into the field that would take typed characters.
+/// One call. Controls other than space are dropped. List hotkeys are left alone.
+pub fn paste_text(state: &mut AppState, raw: &str) -> Result<()> {
+    let graphic: String = raw
+        .chars()
+        .filter(|ch| ch.is_ascii_graphic() || *ch == ' ')
+        .collect();
+    if graphic.is_empty() {
+        return Ok(());
+    }
+    if state.modal.is_none() && state.show_settings && editing_theme_hex(state) {
+        for ch in graphic.chars() {
+            handle_key(state, KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE))?;
+        }
+        return Ok(());
+    }
+    if state.filter_editing && state.modal.is_none() && !state.show_settings {
+        state.filter.push_str(&graphic);
+        flatten_visible(state);
+        return Ok(());
+    }
+    match state.modal.clone() {
+        Some(Modal::EditDest {
+            node_idx,
+            mut browser,
+        }) => {
+            let filter: String = graphic.chars().filter(|ch| ch.is_ascii_graphic()).collect();
+            browser.filter.push_str(&filter);
+            browser.selected = 0;
+            browser.clamp_selected();
+            state.modal = Some(Modal::EditDest { node_idx, browser });
+        }
+        Some(Modal::IgnoreEditor {
+            selected,
+            mut draft,
+        }) => {
+            draft.push_str(&graphic);
+            state.modal = Some(Modal::IgnoreEditor { selected, draft });
+        }
+        Some(Modal::ExportPicker { dir, mut filename }) => {
+            for ch in graphic.chars() {
+                if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                    filename.push(ch);
+                }
+            }
+            state.modal = Some(Modal::ExportPicker { dir, filename });
+        }
+        Some(Modal::GroupEditor { paths, mut draft }) => {
+            draft.push_str(&graphic);
+            state.modal = Some(Modal::GroupEditor { paths, draft });
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
-    if state.theme_ui_open() && key.code == KeyCode::F(2) {
-        open_theme_editor(state);
-        return Ok(false);
+    if is_quit_key(&key) {
+        return Ok(true);
     }
 
     if state.modal.is_some() {
+        if matches!(key.code, KeyCode::F(1) | KeyCode::F(2)) {
+            toggle_settings(state);
+            return Ok(false);
+        }
+        if key.code == KeyCode::F(3) {
+            open_about(state);
+            return Ok(false);
+        }
         return handle_modal_key(state, key);
+    }
+
+    if state.show_settings {
+        handle_settings_key(state, key)?;
+        return Ok(false);
     }
 
     if state.filter_editing {
@@ -32,14 +106,8 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     }
 
     match key.code {
-        KeyCode::F(1) => {
-            state.modal = Some(Modal::Help);
-        }
-        KeyCode::F(2) => open_theme_editor(state),
-        KeyCode::F(3) => {
-            state.modal = Some(Modal::Credits);
-        }
-        KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(true),
+        KeyCode::F(1) | KeyCode::F(2) => toggle_settings(state),
+        KeyCode::F(3) => open_about(state),
         KeyCode::Esc => {
             handle_esc_main(state);
             return Ok(false);
@@ -523,21 +591,6 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             _ => state.modal = None,
         },
 
-        Modal::Help => match key.code {
-            KeyCode::Esc | KeyCode::Enter | KeyCode::F(1) | KeyCode::Char('q') => {
-                state.modal = None;
-            }
-            KeyCode::F(2) => open_theme_editor(state),
-            _ => {}
-        },
-        Modal::Credits => match key.code {
-            KeyCode::Esc | KeyCode::Enter | KeyCode::F(3) | KeyCode::Char('q') => {
-                state.modal = None;
-            }
-            KeyCode::F(2) => open_theme_editor(state),
-            _ => {}
-        },
-
         Modal::ImportPicker {
             files,
             mut selected,
@@ -717,22 +770,231 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 });
             }
         }
-
-        Modal::ThemeEditor(_) => return handle_theme_editor_key(state, key),
-        Modal::ThemePicker => return handle_theme_picker_key(state, key),
     }
 
     Ok(false)
 }
 
-fn handle_theme_editor_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
-    let Some(ek) = map_editor_key(key) else {
-        return Ok(false);
+fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
+    if matches!(key.code, KeyCode::F(1) | KeyCode::F(2)) {
+        crate::actions::close_settings(state, true);
+        return Ok(());
+    }
+    if key.code == KeyCode::F(3) {
+        open_about(state);
+        return Ok(());
+    }
+    if key.code == KeyCode::PageDown {
+        scroll_settings(state, 10);
+        return Ok(());
+    }
+    if key.code == KeyCode::PageUp {
+        scroll_settings(state, -10);
+        return Ok(());
+    }
+    if settings_section_key(state, key) {
+        return Ok(());
+    }
+    if state.settings_nav == PAGE_HELP || state.settings_nav == PAGE_ABOUT {
+        match key.code {
+            KeyCode::Esc => crate::actions::close_settings(state, true),
+            KeyCode::Down | KeyCode::Char('j') => scroll_settings(state, 1),
+            KeyCode::Up | KeyCode::Char('k') => scroll_settings(state, -1),
+            KeyCode::Home | KeyCode::Char('g') => state.help_scroll = 0,
+            KeyCode::End | KeyCode::Char('G') => state.help_scroll = state.help_scroll_max,
+            _ => {}
+        }
+        return Ok(());
+    }
+    if state.settings_nav == PAGE_THEMES {
+        if save_target_key(state, &key) {
+            toggle_save_target(state);
+        } else if let Some(ek) = map_editor_key(key) {
+            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+            if state.theme_editor.is_some() {
+                dispatch_theme_editor(state, ek, shift);
+            } else {
+                dispatch_theme_picker(state, ek);
+            }
+        }
+        return Ok(());
+    }
+    if key.code == KeyCode::Esc {
+        crate::actions::close_settings(state, true);
+    }
+    Ok(())
+}
+
+pub(crate) fn scroll_settings(state: &mut AppState, delta: i32) {
+    state.settings_follow = false;
+    if delta < 0 {
+        state.help_scroll = state
+            .help_scroll
+            .saturating_sub(delta.unsigned_abs() as u16);
+    } else {
+        state.help_scroll = state
+            .help_scroll
+            .saturating_add(delta as u16)
+            .min(state.help_scroll_max);
+    }
+}
+
+pub(crate) fn settings_nav_click(state: &mut AppState, col: u16, row: u16) -> bool {
+    let area = state.pointer.settings_nav_area;
+    if area.width == 0 || area.height == 0 {
+        return false;
+    }
+    let inside = col >= area.x
+        && row >= area.y
+        && col < area.x.saturating_add(area.width)
+        && row < area.y.saturating_add(area.height);
+    if !inside {
+        return false;
+    }
+    let rel = usize::from(row.saturating_sub(area.y));
+    if rel >= NAV.len() {
+        return true;
+    }
+    state.settings_nav = rel as u8;
+    state.help_scroll = 0;
+    state.settings_follow = true;
+    true
+}
+
+fn editing_theme_hex(state: &AppState) -> bool {
+    state
+        .theme_editor
+        .as_ref()
+        .is_some_and(|editor| editor.editing_hex)
+}
+
+fn settings_section_key(state: &mut AppState, key: KeyEvent) -> bool {
+    let Some(dir) = settings_section_dir(key) else {
+        return false;
     };
-    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+    let tab = matches!(key.code, KeyCode::Tab | KeyCode::BackTab);
+    if !tab && editing_theme_hex(state) {
+        return false;
+    }
+    let next = (state.settings_nav as isize + dir).clamp(0, PAGE_LAST as isize) as u8;
+    if next != state.settings_nav {
+        state.settings_nav = next;
+        state.help_scroll = 0;
+        state.settings_follow = true;
+    }
+    true
+}
+
+fn settings_section_dir(key: KeyEvent) -> Option<isize> {
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+    {
+        return None;
+    }
+    match key.code {
+        KeyCode::BackTab => Some(-1),
+        KeyCode::Tab => {
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                Some(-1)
+            } else {
+                Some(1)
+            }
+        }
+        KeyCode::Char(']') => Some(1),
+        KeyCode::Char('[') => Some(-1),
+        _ => None,
+    }
+}
+
+fn save_target_key(state: &AppState, key: &KeyEvent) -> bool {
+    if editing_theme_hex(state) || key.modifiers.contains(KeyModifiers::CONTROL) {
+        return false;
+    }
+    matches!(key.code, KeyCode::Char('t') | KeyCode::Char('T'))
+}
+
+fn toggle_save_target(state: &mut AppState) {
+    let from_editor = if let Some(editor) = state.theme_editor.as_mut() {
+        editor.save_target = editor.save_target.toggled();
+        Some(editor.save_target)
+    } else {
+        None
+    };
+    if let Some(target) = from_editor {
+        if let Some(picker) = state.theme_picker.as_mut() {
+            picker.save_target = target;
+        }
+        return;
+    }
+    if let Some(picker) = state.theme_picker.as_mut() {
+        picker.save_target = picker.save_target.toggled();
+    }
+}
+
+fn theme_motion(key: EditorKey) -> bool {
+    matches!(
+        key,
+        EditorKey::Down
+            | EditorKey::Up
+            | EditorKey::Char('j')
+            | EditorKey::Char('k')
+            | EditorKey::Char('g')
+            | EditorKey::Char('G')
+    )
+}
+
+fn preview_theme_row(state: &mut AppState) {
     let outcome = {
-        let Some(Modal::ThemeEditor(editor)) = &mut state.modal else {
-            return Ok(false);
+        let Some(picker) = state.theme_picker.as_mut() else {
+            return;
+        };
+        picker.preview_selected()
+    };
+    match outcome {
+        PickerOutcome::Applied => apply_live_theme_picker(state),
+        PickerOutcome::Error(msg) => state.show_toast(ToastLevel::Error, msg),
+        _ => {}
+    }
+}
+
+fn dispatch_theme_picker(state: &mut AppState, ek: EditorKey) {
+    let outcome = {
+        let Some(picker) = state.theme_picker.as_mut() else {
+            return;
+        };
+        picker.handle(ek)
+    };
+    match outcome {
+        PickerOutcome::Applied => apply_live_theme_picker(state),
+        PickerOutcome::EditColors => {
+            let Some(picker) = state.theme_picker.as_ref() else {
+                return;
+            };
+            let mut editor =
+                ThemeEditor::new(picker.palette.clone(), crate::theme::extra_theme_fields());
+            editor.save_target = picker.save_target;
+            state.theme_editor = Some(editor);
+        }
+        PickerOutcome::RequestSave => {
+            if let Err(err) = save_theme_editor(state) {
+                state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
+            }
+        }
+        PickerOutcome::Error(msg) => state.show_toast(ToastLevel::Error, msg),
+        PickerOutcome::Closed { .. } => crate::actions::close_settings(state, true),
+        PickerOutcome::None => {
+            if theme_motion(ek) {
+                preview_theme_row(state);
+                state.settings_follow = true;
+            }
+        }
+    }
+}
+
+fn dispatch_theme_editor(state: &mut AppState, ek: EditorKey, shift: bool) {
+    let outcome = {
+        let Some(editor) = state.theme_editor.as_mut() else {
+            return;
         };
         editor.handle(ek, shift)
     };
@@ -743,49 +1005,20 @@ fn handle_theme_editor_key(state: &mut AppState, key: KeyEvent) -> Result<bool> 
                 state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
             }
         }
-        EditorOutcome::Closed { .. } => escape_theme(state),
+        EditorOutcome::Closed { .. } => step_back_theme_editor(state),
         EditorOutcome::HexError(err) => {
             state.show_toast(ToastLevel::Error, format!("Invalid hex: {err}"));
         }
-        EditorOutcome::None => {}
-    }
-    Ok(false)
-}
-
-fn handle_theme_picker_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
-    let Some(ek) = map_editor_key(key) else {
-        return Ok(false);
-    };
-    let outcome = {
-        let Some(picker) = state.theme_picker.as_mut() else {
-            return Ok(false);
-        };
-        picker.handle(ek)
-    };
-    match outcome {
-        PickerOutcome::Applied => apply_live_theme_picker(state),
-        PickerOutcome::EditColors => {
-            let Some((palette, target)) = state
-                .theme_picker
+        EditorOutcome::None => {
+            let editing = state
+                .theme_editor
                 .as_ref()
-                .map(|picker| (picker.palette.clone(), picker.save_target))
-            else {
-                return Ok(false);
-            };
-            let mut editor = ThemeEditor::new(palette, &[]);
-            editor.save_target = target;
-            state.modal = Some(Modal::ThemeEditor(editor));
-        }
-        PickerOutcome::RequestSave => {
-            if let Err(err) = save_theme_editor(state) {
-                state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
+                .is_some_and(|editor| editor.editing_hex);
+            if theme_motion(ek) && !editing {
+                state.settings_follow = true;
             }
         }
-        PickerOutcome::Error(msg) => state.show_toast(ToastLevel::Error, msg),
-        PickerOutcome::Closed { .. } => escape_theme(state),
-        PickerOutcome::None => {}
     }
-    Ok(false)
 }
 
 fn map_editor_key(key: KeyEvent) -> Option<EditorKey> {

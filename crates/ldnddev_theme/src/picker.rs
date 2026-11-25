@@ -3,7 +3,7 @@
 use crate::editor::{EditorKey, ThemeSaveTarget};
 use crate::fields::ColorField;
 use crate::omarchy::{
-    discover, display_name, load_colors, map_palette, OmarchyChoice, OmarchyPaths, OmarchyTheme,
+    OmarchyChoice, OmarchyPaths, OmarchyTheme, discover, display_name, load_colors, map_palette,
 };
 use crate::palette::Palette;
 use std::fs;
@@ -69,6 +69,13 @@ impl ThemePicker {
 
     pub fn revert_palette(&self) -> Palette {
         self.snapshot.clone()
+    }
+
+    /// Paint the highlighted row into [`Self::palette`].
+    /// The snapshot from [`Self::new`] stays, so Esc can still revert.
+    /// `handle` does not call this for j/k; the sheet previews after the move.
+    pub fn preview_selected(&mut self) -> PickerOutcome {
+        self.apply_selected()
     }
 
     pub fn select(&mut self, selected: usize) {

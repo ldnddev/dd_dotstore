@@ -7,16 +7,25 @@
 # GITHUB_TOKEN is optional and only needed if you hit GitHub API rate limits.
 #
 # From a source checkout:
-#   ./install.sh
-#   ./install.sh --uninstall
+#   ./install.sh                 # ask: terminal, window, or both
+#   ./install.sh --tui
+#   ./install.sh --gui
+#   ./install.sh --both
+#   ./install.sh --uninstall     # ask the same question
 #
-# Install writes the binary, the theme, and a desktop launcher.
-# --uninstall removes those installed files. It leaves project maps and
-# your dotfiles alone. Pass the same BINDIR, PREFIX, XDG_CONFIG_HOME, and
-# XDG_DATA_HOME you used to install.
+# Install writes the chosen binary and its desktop launcher. The theme is
+# installed only when it is missing, and only for the terminal or both.
+# --uninstall removes the chosen binary and desktop file. It leaves
+# dd_dotstore_theme.yml, project maps, and ldnddev config alone. Pass the
+# same BINDIR, PREFIX, and XDG_DATA_HOME you used to install.
+#
+# With no terminal to answer, install selects the terminal app and uninstall
+# removes both. INSTALL_GUI=1 is the same as --both.
 set -euo pipefail
 
 APP_NAME="dd_dotstore"
+GUI_APP_NAME="dd_dotstore-gui"
+WM_CLASS="dev.ldnddev.dd_dotstore"
 THEME_FILE_NAME="dd_dotstore_theme.yml"
 THEME_DIR_NAME="ldnddev"
 MIN_RUST_VERSION="1.85.0"
@@ -36,7 +45,10 @@ Usage:
   ./install.sh [options]
 
 Options:
-  --from-release         Download the prebuilt package for this machine
+  --tui                  Install the terminal app
+  --gui                  Install the desktop window
+  --both                 Install the terminal app and the window
+  --from-release         Download the prebuilt terminal package for this machine
   --from-source          Build from a source checkout or a git clone
   --tag TAG              Install this release tag (default: latest)
   --tarball FILE         Install from a local release tarball
@@ -45,18 +57,25 @@ Options:
   --debug                Source build only: cargo build without --release
   --no-build             Source build only: reuse an already-built binary
   -uninstall, --uninstall
-                         Remove the installed binary, theme, and desktop launcher
+                         Remove the chosen binary and desktop launcher.
+                         Leaves dd_dotstore_theme.yml and config in place.
   -h, --help             Show this help
+
+Pass only one of --tui, --gui, or --both. With no terminal to answer, install
+selects the terminal app and uninstall removes both. INSTALL_GUI=1 is the
+same as --both. The release archive is the terminal app. The window is built
+with: cargo build --release -p dd_dotstore_gui
 
 Environment:
   BINDIR=/path/to/bin      Install the binary into this directory.
   PREFIX=/path             Install into PREFIX/bin when BINDIR is not set.
   XDG_CONFIG_HOME=/path    Install the theme under XDG_CONFIG_HOME/ldnddev.
   XDG_DATA_HOME=/path      Install the launcher under XDG_DATA_HOME/applications.
-  VERSION / --tag          Release tag to download (v1.6.6 or 1.6.6).
+  VERSION / --tag          Release tag to download (v1.6.7 or 1.6.7).
   REPO=owner/name          GitHub repo used for downloads and clones.
   GITHUB_TOKEN=...         Optional; raises GitHub API rate limits.
   TARGET=triple            Override the detected package target.
+  INSTALL_GUI=1            Same as --both when no --tui, --gui, or --both.
 
 Defaults:
   BINDIR=\$HOME/.local/bin
@@ -68,7 +87,7 @@ Defaults:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --uninstall
-  curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --tag v1.6.6
+  curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --tag v1.6.7
   PREFIX=/usr/local ./install.sh
   BINDIR=/opt/bin ./install.sh --from-release
 USAGE
@@ -77,6 +96,98 @@ USAGE
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
+}
+
+# ldnddev wordmark, half-block art of the white-on-black mark.
+# Printed only on a terminal so a captured log stays plain text.
+print_mark() {
+  [[ -t 1 ]] || return 0
+  printf '\033[40;97m'
+  cat <<'EOF'
+
+█▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█
+█  ██                ██                         ██  █
+█  ██                ██                         ██  █
+█  ██         ▄▄▄▄▄▄ ██     ▄▄▄▄▄▄       ▄▄▄▄▄▄ ██  █
+█  ██       ▄██▀▀▀▀▀███  ▄██████████▄  ▄██▀▀▀▀▀███  █
+█  ██      ██▀       ██  ██        ██ ██▀       ██  █
+█  ██      ██        ██  ██        ██ ██        ██  █
+█  ██      ▀█▄       ██  ██        ██ ▀█▄       ██  █
+█  ▀█▄▄▄▄▄  ▀██▄▄▄▄██▀   ██        ██  ▀██▄▄▄▄██▀   █
+█   ▀▀▀▀▀▀    ▀▀▀▀▀▀     ▀▀        ▀▀    ▀▀▀▀▀▀     █
+█                                                   █
+█                     ██                            █
+█                     ██                            █
+█              ▄▄▄▄▄▄ ██     ▄▄▄▄▄▄    ▄▄      ▄▄▄  █
+█            ▄██▀▀▀▀▀███   ██▀▀▀▀███   ██     ▄██   █
+█           ██▀       ██  ██    ██▀ ▄▄ ██    ▄██    █
+█           ██        ██  ██  ▄██   ██ ██    ██     █
+█           ▀█▄       ██  ██▄██▀   ▄█▀ ██  ▄██      █
+█  ▄▄▄▄▄▄▄▄  ▀██▄▄▄▄██▀    ▀███▄▄▄██▀  ██▄██▀       █
+█  ▀▀▀▀▀▀▀▀    ▀▀▀▀▀▀        ▀▀▀▀▀▀    ▀▀▀▀         █
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+EOF
+  printf '\033[0m\n'
+}
+
+# The device node is mode rw-rw-rw, so -r/-w stay true with no controlling
+# terminal. Opening it is the check that matters.
+have_tty() {
+  { : <>/dev/tty; } 2>/dev/null
+}
+
+# Read 1, 2, or 3 from the terminal. stdout is tui, gui, or both.
+# $1 is the verb shown in the question. $2 is the default number.
+# Returns 1 when the terminal cannot be used. main captures stdout, and a
+# failed redirect in that capture does not abort under set -e, so every
+# /dev/tty failure has to be an explicit status.
+ask_choice() {
+  local verb=$1 default=$2 answer choice
+  while true; do
+    {
+      printf '%s which program?\n' "$verb"
+      printf '%s\n' "  1) terminal (${APP_NAME})"
+      printf '%s\n' "  2) desktop window (${GUI_APP_NAME})"
+      printf '%s\n' "  3) both"
+      printf 'Choice [%s]: ' "$default"
+    } >/dev/tty 2>/dev/null || return 1
+    if ! IFS= read -r answer </dev/tty 2>/dev/null; then
+      printf '\n' >/dev/tty 2>/dev/null || true
+      answer=$default
+    fi
+    choice=$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+    case "$choice" in
+      '' ) choice=$default ;;
+    esac
+    case "$choice" in
+      1 | tui | terminal) printf '%s\n' tui; return 0 ;;
+      2 | gui | window) printf '%s\n' gui; return 0 ;;
+      3 | both) printf '%s\n' both; return 0 ;;
+      *) printf '%s\n' "Enter 1, 2, or 3." >/dev/tty 2>/dev/null || return 1 ;;
+    esac
+  done
+}
+
+choose_target() {
+  local action=$1 explicit=$2
+  if [ -n "$explicit" ]; then
+    printf '%s\n' "$explicit"
+    return 0
+  fi
+  if have_tty; then
+    if [ "$action" = uninstall ]; then
+      ask_choice "Remove" 3 && return 0
+    else
+      ask_choice "Install" 1 && return 0
+    fi
+  fi
+  if [ "$action" = uninstall ]; then
+    printf '==> %s\n' "No terminal for a prompt. Removing both programs." >&2
+    printf '%s\n' both
+  else
+    printf '==> %s\n' "No terminal for a prompt. Installing the terminal app." >&2
+    printf '%s\n' tui
+  fi
 }
 
 # Release tags, asset names, and repo owner/name. Rejects `..` so a tag cannot
@@ -477,12 +588,25 @@ refresh_desktop_database() {
   fi
 }
 
-install_launcher() {
-  local exec_q tmpfile
-  exec_q="$(desktop_quote "$INSTALL_DIR/$APP_NAME")"
+write_desktop_file() {
+  local dest="$1"
+  local tmpfile
   mkdir -p "$DESKTOP_DIR"
-  tmpfile="$(mktemp "$DESKTOP_DIR/.${APP_NAME}.desktop.XXXXXX")"
-  if ! cat >"$tmpfile" <<EOF
+  tmpfile="$(mktemp "$DESKTOP_DIR/.desktop.XXXXXX")"
+  if ! cat >"$tmpfile"; then
+    rm -f "$tmpfile"
+    fail "could not write ${dest}"
+  fi
+  chmod 0644 "$tmpfile"
+  # mv replaces a symlink at the destination instead of writing through it.
+  mv -f "$tmpfile" "$dest"
+  info "launcher ${dest}"
+}
+
+install_tui_launcher() {
+  local exec_q
+  exec_q="$(desktop_quote "$INSTALL_DIR/$APP_NAME")"
+  write_desktop_file "$DESKTOP_TARGET" <<EOF
 [Desktop Entry]
 Type=Application
 Version=1.0
@@ -497,55 +621,97 @@ Categories=Utility;
 Keywords=dotfiles;symlink;xdg;
 StartupNotify=false
 EOF
-  then
-    rm -f "$tmpfile"
-    fail "could not write ${DESKTOP_TARGET}"
+}
+
+install_gui_launcher() {
+  local exec_q
+  exec_q="$(desktop_quote "$INSTALL_DIR/$GUI_APP_NAME")"
+  write_desktop_file "$GUI_DESKTOP_TARGET" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=${APP_NAME} GUI
+GenericName=Dotfile manager
+Comment=Map dotfiles onto home and XDG paths
+Exec=${exec_q}
+TryExec=${INSTALL_DIR}/${GUI_APP_NAME}
+Terminal=false
+Icon=utilities-terminal
+Categories=Utility;
+Keywords=dotfiles;symlink;xdg;
+StartupNotify=true
+StartupWMClass=${WM_CLASS}
+EOF
+}
+
+# Refresh a launcher for every binary still in BINDIR, so installing the
+# terminal again does not drop the window launcher.
+install_launchers() {
+  if [ -e "$INSTALL_DIR/$APP_NAME" ] || [ -L "$INSTALL_DIR/$APP_NAME" ]; then
+    install_tui_launcher
   fi
-  chmod 0644 "$tmpfile"
-  # mv replaces a symlink at the destination instead of writing through it.
-  mv -f "$tmpfile" "$DESKTOP_TARGET"
-  info "launcher ${DESKTOP_TARGET}"
+  if [ -e "$INSTALL_DIR/$GUI_APP_NAME" ] || [ -L "$INSTALL_DIR/$GUI_APP_NAME" ]; then
+    install_gui_launcher
+  fi
   refresh_desktop_database "$DESKTOP_DIR"
 }
 
-install_files() {
-  local source_bin="$1"
-  local source_theme="$2"
+install_one_binary() {
+  local name="$1"
+  local source_bin="$2"
 
   [ -f "$source_bin" ] || fail "binary not found at $source_bin"
   [ -x "$source_bin" ] || chmod 0755 "$source_bin"
-  [ -f "$source_theme" ] || fail "theme file not found at $source_theme"
-
-  info "installing to ${INSTALL_DIR}/${APP_NAME}"
+  info "installing to ${INSTALL_DIR}/${name}"
   mkdir -p "$INSTALL_DIR"
-  install -m 0755 "$source_bin" "$INSTALL_DIR/$APP_NAME"
+  install -m 0755 "$source_bin" "$INSTALL_DIR/$name"
+}
 
+install_theme_if_missing() {
+  local source_theme="$1"
+
+  if [ -e "$THEME_TARGET" ] || [ -L "$THEME_TARGET" ]; then
+    info "leaving existing theme ${THEME_TARGET}"
+    return 0
+  fi
+  [ -f "$source_theme" ] || fail "theme file not found at $source_theme"
   info "installing theme to ${THEME_TARGET}"
   mkdir -p "$THEME_DIR"
   install -m 0644 "$source_theme" "$THEME_TARGET"
+}
 
-  install_launcher
-
-  if command -v "$INSTALL_DIR/$APP_NAME" >/dev/null 2>&1; then
-    info "installed $("$INSTALL_DIR/$APP_NAME" --help | head -n1)"
-  else
-    info "installed ${APP_NAME}"
-  fi
-
+note_path() {
+  local name="$1"
   case ":$PATH:" in
     *":$INSTALL_DIR:"*) ;;
     *)
       cat <<PATH_NOTE
 
 ${INSTALL_DIR} is not on your PATH.
-The desktop launcher still starts ${APP_NAME}, because it uses the full path.
-Add this line to your shell profile if you want to run ${APP_NAME} by name:
+The desktop launcher still starts ${name}, because it uses the full path.
+Add this line to your shell profile if you want to run ${name} by name:
 
   export PATH="${INSTALL_DIR}:\$PATH"
 
 PATH_NOTE
       ;;
   esac
+}
+
+install_files() {
+  local source_bin="$1"
+  local source_theme="$2"
+
+  install_one_binary "$APP_NAME" "$source_bin"
+  install_theme_if_missing "$source_theme"
+  install_launchers
+
+  if command -v "$INSTALL_DIR/$APP_NAME" >/dev/null 2>&1; then
+    info "installed $("$INSTALL_DIR/$APP_NAME" --help | head -n1)"
+  else
+    info "installed ${APP_NAME}"
+  fi
+  note_path "$APP_NAME"
 }
 
 validate_tarball_members() {
@@ -619,6 +785,9 @@ install_from_tarball() {
   local unpacked bin theme
 
   [ -f "$archive" ] || fail "tarball not found at $archive"
+  if [ "$TARGET_CHOICE" = "gui" ]; then
+    fail "the release archive is the terminal app; use --from-source --gui"
+  fi
   if [ -n "$checksum_file" ]; then
     verify_checksum "$archive" "$checksum_file"
   fi
@@ -626,6 +795,15 @@ install_from_tarball() {
   unpacked="$(make_tempdir)/unpacked"
   IFS="$(printf '\t')" read -r bin theme < <(unpack_tarball "$archive" "$unpacked")
   install_files "$bin" "$theme"
+  if [ "$TARGET_CHOICE" = "both" ]; then
+    warn "the release archive does not include the window"
+    if in_source_tree "${SCRIPT_DIR:-}"; then
+      info "building the window from this source tree"
+      build_gui_only "$SCRIPT_DIR"
+    else
+      warn "use --from-source --gui to build the window"
+    fi
+  fi
 }
 
 download_release_package() {
@@ -731,7 +909,22 @@ ensure_rust() {
   fi
 }
 
-build_from_source_dir() {
+profile_bin_dir() {
+  local source_dir="$1"
+  local base
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    base="${CARGO_TARGET_DIR%/}"
+  else
+    base="$source_dir/target"
+  fi
+  if [ "$BUILD_PROFILE" = "release" ]; then
+    printf '%s/release\n' "$base"
+  else
+    printf '%s/debug\n' "$base"
+  fi
+}
+
+build_terminal_only() {
   local source_dir="$1"
   local source_bin theme_source
 
@@ -752,14 +945,47 @@ build_from_source_dir() {
     fi
   )
 
-  if [ "$BUILD_PROFILE" = "release" ]; then
-    source_bin="$source_dir/target/release/$APP_NAME"
-  else
-    source_bin="$source_dir/target/debug/$APP_NAME"
-  fi
+  source_bin="$(profile_bin_dir "$source_dir")/$APP_NAME"
   theme_source="$source_dir/$THEME_FILE_NAME"
   [ -x "$source_bin" ] || fail "built binary not found at $source_bin"
   install_files "$source_bin" "$theme_source"
+}
+
+build_gui_only() {
+  local source_dir="$1"
+  local source_bin
+
+  (
+    cd "$source_dir"
+    ensure_rust
+    if [ "$DO_BUILD" -eq 1 ]; then
+      info "building ${GUI_APP_NAME} (${BUILD_PROFILE})"
+      if [ "$BUILD_PROFILE" = "release" ]; then
+        cargo build --release -p dd_dotstore_gui
+      else
+        cargo build -p dd_dotstore_gui
+      fi
+    fi
+  )
+
+  source_bin="$(profile_bin_dir "$source_dir")/$GUI_APP_NAME"
+  [ -x "$source_bin" ] || fail "built binary not found at $source_bin"
+  install_one_binary "$GUI_APP_NAME" "$source_bin"
+  install_launchers
+  note_path "$GUI_APP_NAME"
+  info "${GUI_APP_NAME} needs Vulkan (libvulkan1 and a driver) and Wayland or X11."
+}
+
+build_from_source_dir() {
+  local source_dir="$1"
+  case "${TARGET_CHOICE:-tui}" in
+    gui) build_gui_only "$source_dir" ;;
+    both)
+      build_terminal_only "$source_dir"
+      build_gui_only "$source_dir"
+      ;;
+    *) build_terminal_only "$source_dir" ;;
+  esac
 }
 
 clone_and_build() {
@@ -805,163 +1031,214 @@ install_from_source() {
   clone_and_build "$TAG"
 }
 
-BUILD_PROFILE="release"
-DO_BUILD=1
-UNINSTALL=0
-FROM_RELEASE=0
-FROM_SOURCE=0
-PRINT_TARGET=0
-PRINT_URL=0
-TARBALL=""
-TAG="${VERSION:-latest}"
+remove_path() {
+  local path="$1"
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    rm -f -- "$path"
+    info "removed ${path}"
+  else
+    info "not found at ${path}"
+  fi
+}
 
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -uninstall | --uninstall)
-      UNINSTALL=1
+uninstall_choice() {
+  info "uninstalling ${TARGET_CHOICE}"
+  case "$TARGET_CHOICE" in
+    tui)
+      remove_path "$INSTALL_DIR/$APP_NAME"
+      remove_path "$DESKTOP_TARGET"
       ;;
-    --from-release)
-      FROM_RELEASE=1
+    gui)
+      remove_path "$INSTALL_DIR/$GUI_APP_NAME"
+      remove_path "$GUI_DESKTOP_TARGET"
       ;;
-    --from-source)
-      FROM_SOURCE=1
+    both)
+      remove_path "$INSTALL_DIR/$APP_NAME"
+      remove_path "$INSTALL_DIR/$GUI_APP_NAME"
+      remove_path "$DESKTOP_TARGET"
+      remove_path "$GUI_DESKTOP_TARGET"
       ;;
-    --tag)
-      [ "$#" -ge 2 ] || fail "--tag requires a value"
-      TAG="$2"
-      shift
-      ;;
-    --tag=*)
-      TAG="${1#*=}"
-      ;;
-    --tarball)
-      [ "$#" -ge 2 ] || fail "--tarball requires a path"
-      TARBALL="$2"
-      shift
-      ;;
-    --tarball=*)
-      TARBALL="${1#*=}"
-      ;;
-    --print-target)
-      PRINT_TARGET=1
-      ;;
-    --print-url)
-      PRINT_URL=1
-      ;;
-    --debug)
-      BUILD_PROFILE="debug"
-      ;;
-    --no-build)
-      DO_BUILD=0
-      ;;
-    -h | --help)
-      usage
-      exit 0
-      ;;
-    *)
-      fail "unknown option: $1"
-      ;;
+    *) fail "internal: unknown target ${TARGET_CHOICE}" ;;
   esac
-  shift
-done
+  refresh_desktop_database "$DESKTOP_DIR"
+  info "left ${THEME_TARGET} in place"
+  info "left ldnddev config in place"
+  info "done"
+}
 
-if [ "$FROM_RELEASE" -eq 1 ] && [ "$FROM_SOURCE" -eq 1 ]; then
-  fail "use only one of --from-release or --from-source"
-fi
+main() {
+  BUILD_PROFILE="release"
+  DO_BUILD=1
+  UNINSTALL=0
+  FROM_RELEASE=0
+  FROM_SOURCE=0
+  PRINT_TARGET=0
+  PRINT_URL=0
+  SHOW_HELP=0
+  TARBALL=""
+  TAG="${VERSION:-latest}"
+  TARGET_CHOICE=""
 
-resolve_github_token
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      *=*)
+        flag="${1%%=*}"
+        rest="${1#*=}"
+        flag="$(printf '%s' "$flag" | tr '[:upper:]' '[:lower:]')"
+        word="${flag}=${rest}"
+        ;;
+      *)
+        word="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+        ;;
+    esac
+    case "$word" in
+      --tui | --gui | --both)
+        if [ -n "$TARGET_CHOICE" ]; then
+          fail "pass only one of --tui, --gui, or --both"
+        fi
+        TARGET_CHOICE="${word#--}"
+        ;;
+      -uninstall | --uninstall)
+        UNINSTALL=1
+        ;;
+      --from-release)
+        FROM_RELEASE=1
+        ;;
+      --from-source)
+        FROM_SOURCE=1
+        ;;
+      --tag)
+        [ "$#" -ge 2 ] || fail "--tag requires a value"
+        TAG="$2"
+        shift
+        ;;
+      --tag=*)
+        TAG="${1#*=}"
+        ;;
+      --tarball)
+        [ "$#" -ge 2 ] || fail "--tarball requires a path"
+        TARBALL="$2"
+        shift
+        ;;
+      --tarball=*)
+        TARBALL="${1#*=}"
+        ;;
+      --print-target)
+        PRINT_TARGET=1
+        ;;
+      --print-url)
+        PRINT_URL=1
+        ;;
+      --debug)
+        BUILD_PROFILE="debug"
+        ;;
+      --no-build)
+        DO_BUILD=0
+        ;;
+      -h | --help)
+        SHOW_HELP=1
+        ;;
+      *)
+        fail "unknown option: $1"
+        ;;
+    esac
+    shift
+  done
 
-SCRIPT_DIR=""
-if resolved_dir="$(resolve_script_dir)"; then
-  SCRIPT_DIR="$resolved_dir"
-fi
-
-if [ -n "${BINDIR:-}" ]; then
-  INSTALL_DIR="$BINDIR"
-elif [ -n "${PREFIX:-}" ]; then
-  INSTALL_DIR="${PREFIX%/}/bin"
-else
-  INSTALL_DIR="$HOME/.local/bin"
-fi
-
-CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-THEME_DIR="${CONFIG_HOME%/}/${THEME_DIR_NAME}"
-THEME_TARGET="$THEME_DIR/$THEME_FILE_NAME"
-DESKTOP_DIR="$(apps_dir)"
-DESKTOP_TARGET="$DESKTOP_DIR/${APP_NAME}.desktop"
-TARGET="${TARGET:-$(detect_target)}"
-
-if [ "$PRINT_TARGET" -eq 1 ]; then
-  printf '%s\n' "$TARGET"
-  exit 0
-fi
-
-if [ "$PRINT_URL" -eq 1 ]; then
-  resolved_tag="$(resolve_tag "$TAG")"
-  asset_url "$resolved_tag" "$TARGET"
-  exit 0
-fi
-
-if [ "$UNINSTALL" -eq 1 ]; then
-  info "uninstalling ${APP_NAME}"
-
-  if [ -e "$INSTALL_DIR/$APP_NAME" ] || [ -L "$INSTALL_DIR/$APP_NAME" ]; then
-    rm -f "$INSTALL_DIR/$APP_NAME"
-    info "removed ${INSTALL_DIR}/${APP_NAME}"
-  else
-    info "binary not found at ${INSTALL_DIR}/${APP_NAME}"
+  if [ "$FROM_RELEASE" -eq 1 ] && [ "$FROM_SOURCE" -eq 1 ]; then
+    fail "use only one of --from-release or --from-source"
+  fi
+  if [ -z "$TARGET_CHOICE" ] && [ "${INSTALL_GUI:-}" = "1" ]; then
+    TARGET_CHOICE="both"
   fi
 
-  if [ -e "$THEME_TARGET" ] || [ -L "$THEME_TARGET" ]; then
-    rm -f "$THEME_TARGET"
-    info "removed ${THEME_TARGET}"
-  else
-    info "theme not found at ${THEME_TARGET}"
+  resolve_github_token
+
+  SCRIPT_DIR=""
+  if resolved_dir="$(resolve_script_dir)"; then
+    SCRIPT_DIR="$resolved_dir"
   fi
 
-  if [ -d "$THEME_DIR" ]; then
-    if rmdir "$THEME_DIR" 2>/dev/null; then
-      info "removed empty theme directory ${THEME_DIR}"
+  if [ -n "${BINDIR:-}" ]; then
+    INSTALL_DIR="$BINDIR"
+  elif [ -n "${PREFIX:-}" ]; then
+    INSTALL_DIR="${PREFIX%/}/bin"
+  else
+    INSTALL_DIR="$HOME/.local/bin"
+  fi
+
+  CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+  THEME_DIR="${CONFIG_HOME%/}/${THEME_DIR_NAME}"
+  THEME_TARGET="$THEME_DIR/$THEME_FILE_NAME"
+  DESKTOP_DIR="$(apps_dir)"
+  DESKTOP_TARGET="$DESKTOP_DIR/${APP_NAME}.desktop"
+  GUI_DESKTOP_TARGET="$DESKTOP_DIR/${GUI_APP_NAME}.desktop"
+  TARGET="${TARGET:-$(detect_target)}"
+
+  if [ "$PRINT_TARGET" -eq 1 ]; then
+    printf '%s\n' "$TARGET"
+    exit 0
+  fi
+
+  if [ "$PRINT_URL" -eq 1 ]; then
+    resolved_tag="$(resolve_tag "$TAG")"
+    asset_url "$resolved_tag" "$TARGET"
+    exit 0
+  fi
+
+  print_mark
+
+  if [ "$SHOW_HELP" -eq 1 ]; then
+    usage
+    exit 0
+  fi
+
+  if [ "$UNINSTALL" -eq 1 ]; then
+    TARGET_CHOICE="$(choose_target uninstall "$TARGET_CHOICE")"
+    uninstall_choice
+    exit 0
+  fi
+
+  TARGET_CHOICE="$(choose_target install "$TARGET_CHOICE")"
+
+  if [ -n "$TARBALL" ]; then
+    checksum_file=""
+    if [ -f "${TARBALL}.sha256" ]; then
+      checksum_file="${TARBALL}.sha256"
+    fi
+    install_from_tarball "$TARBALL" "$checksum_file"
+    info "done"
+    exit 0
+  fi
+
+  if [ "$TARGET_CHOICE" = "gui" ] && [ "$FROM_RELEASE" -eq 1 ]; then
+    fail "the release archive is the terminal app; use --from-source --gui"
+  fi
+
+  if [ "$FROM_RELEASE" -eq 1 ]; then
+    install_from_release "$TAG" "$TARGET"
+  elif [ "$FROM_SOURCE" -eq 1 ]; then
+    install_from_source
+  elif in_source_tree "$SCRIPT_DIR"; then
+    install_from_source
+  elif [ "$TARGET_CHOICE" = "gui" ]; then
+    warn "the release archive is the terminal app; building the window from source"
+    install_from_source
+  else
+    if try_install_from_release "$TAG" "$TARGET"; then
+      :
     else
-      info "left ${THEME_DIR} in place because it contains other files"
+      warn "no prebuilt package for ${TARGET}; building from source"
+      install_from_source
     fi
   fi
 
-  if [ -e "$DESKTOP_TARGET" ] || [ -L "$DESKTOP_TARGET" ]; then
-    rm -f "$DESKTOP_TARGET"
-    info "removed ${DESKTOP_TARGET}"
-    refresh_desktop_database "$DESKTOP_DIR"
-  else
-    info "launcher not found at ${DESKTOP_TARGET}"
-  fi
-
   info "done"
-  exit 0
-fi
+}
 
-if [ -n "$TARBALL" ]; then
-  checksum_file=""
-  if [ -f "${TARBALL}.sha256" ]; then
-    checksum_file="${TARBALL}.sha256"
-  fi
-  install_from_tarball "$TARBALL" "$checksum_file"
-  info "done"
-  exit 0
+# `curl | bash` reads this file from stdin. BASH_SOURCE is unset then, and
+# `set -u` aborts on a bare ${BASH_SOURCE[0]}. An empty source means the
+# file is being executed, not sourced.
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]:-}" == "$0" ]]; then
+  main "$@"
 fi
-
-if [ "$FROM_RELEASE" -eq 1 ]; then
-  install_from_release "$TAG" "$TARGET"
-elif [ "$FROM_SOURCE" -eq 1 ]; then
-  install_from_source
-elif in_source_tree "$SCRIPT_DIR"; then
-  install_from_source
-else
-  if try_install_from_release "$TAG" "$TARGET"; then
-    :
-  else
-    warn "no prebuilt package for ${TARGET}; building from source"
-    install_from_source
-  fi
-fi
-
-info "done"

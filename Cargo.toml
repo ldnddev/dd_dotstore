@@ -1,11 +1,14 @@
 [package]
 name = "dd_dotstore"
-version = "1.6.6"
+version = "1.6.7"
 edition = "2024"
 rust-version = "1.85"
 
 [workspace]
-members = ["crates/ldnddev_theme"]
+members = ["crates/ldnddev_theme", "crates/dd_dotstore_gui"]
+# The terminal package is the root. The window crate stays off this list so
+# `cargo build` and a terminal install do not compile GPUI.
+default-members = [".", "crates/ldnddev_theme"]
 resolver = "2"
 
 [dependencies]

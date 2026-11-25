@@ -3,12 +3,14 @@ use crate::domain::{
 };
 use crate::scan::{adopt_candidates_for_state, collect_doctor_findings};
 use crate::theme::{
-    ThemeEditor, ThemePicker, ThemeSaveTarget, ThemeSource, ThemeStatus, default_config_home,
-    local_theme_path, palette_from_theme, save_theme, theme_from_palette,
+    COLOR_FIELDS, THEME_FILE_NAME, ThemeEditor, ThemePicker, ThemeSaveTarget, ThemeSource,
+    ThemeStatus, default_config_home, extra_theme_fields, local_theme_path, palette_from_theme,
+    theme_from_palette,
 };
 use crate::tree::{
     expand_ancestors, find_mut_node, find_node, flatten_visible, set_action_mode, set_dest,
 };
+use crate::ui::settings::{PAGE_ABOUT, PAGE_LAST, PAGE_THEMES};
 use crate::ui::toast::ToastLevel;
 use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
@@ -842,29 +844,50 @@ pub fn jump_to_doctor_source(state: &mut AppState, src: &Path) {
     }
 }
 
-pub fn open_theme_editor(state: &mut AppState) {
-    if state.theme_ui_open() {
-        close_theme(state, true);
-        return;
-    }
-    let palette = palette_from_theme(&state.theme);
-    let picker = ThemePicker::new(palette.clone(), &[], state.omarchy_paths.clone());
-    if picker.lists_omarchy() {
-        state.theme_picker = Some(picker);
-        state.modal = Some(Modal::ThemePicker);
+/// F1 and F2. Opens Themes, or closes and restores the palette from open.
+pub fn toggle_settings(state: &mut AppState) {
+    if state.show_settings {
+        close_settings(state, true);
     } else {
-        state.theme_picker = None;
-        state.modal = Some(Modal::ThemeEditor(ThemeEditor::new(palette, &[])));
+        open_settings(state, PAGE_THEMES);
     }
 }
 
+/// F3. Opens the sheet on About, or moves there without a new snapshot.
+pub fn open_about(state: &mut AppState) {
+    if !state.show_settings {
+        open_settings(state, PAGE_ABOUT);
+        return;
+    }
+    state.settings_nav = PAGE_ABOUT;
+    state.help_scroll = 0;
+    state.settings_follow = false;
+}
+
+pub fn open_settings(state: &mut AppState, page: u8) {
+    let palette = palette_from_theme(&state.theme);
+    let extras = extra_theme_fields();
+    let picker = ThemePicker::new(palette.clone(), extras, state.omarchy_paths.clone());
+    if picker.lists_omarchy() {
+        state.theme_picker = Some(picker);
+        state.theme_editor = None;
+    } else {
+        state.theme_picker = None;
+        state.theme_editor = Some(ThemeEditor::new(palette, extras));
+    }
+    state.show_settings = true;
+    state.settings_nav = page.min(PAGE_LAST);
+    state.help_scroll = 0;
+    state.help_scroll_max = 0;
+    state.settings_follow = false;
+}
+
 pub fn apply_live_theme_editor(state: &mut AppState) {
-    let Some((palette, target)) = (|| {
-        let Modal::ThemeEditor(editor) = state.modal.as_ref()? else {
-            return None;
-        };
-        Some((editor.palette.clone(), editor.save_target))
-    })() else {
+    let Some((palette, target)) = state
+        .theme_editor
+        .as_ref()
+        .map(|editor| (editor.palette.clone(), editor.save_target))
+    else {
         return;
     };
     if let Some(picker) = state.theme_picker.as_mut() {
@@ -885,13 +908,10 @@ pub fn apply_live_theme_picker(state: &mut AppState) {
     state.theme = theme_from_palette(palette);
 }
 
-/// Esc. Editor returns to the list; the list reverts to the palette from when F2 opened.
-pub fn escape_theme(state: &mut AppState) {
-    if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-        editor.revert();
-    }
-    if matches!(state.modal, Some(Modal::ThemeEditor(_))) && state.theme_picker.is_some() {
-        let Some(Modal::ThemeEditor(editor)) = state.modal.take() else {
+/// Esc from the color editor. A theme list stays; otherwise the sheet reverts.
+pub fn step_back_theme_editor(state: &mut AppState) {
+    if state.theme_picker.is_some() {
+        let Some(editor) = state.theme_editor.take() else {
             return;
         };
         let palette = editor.palette.clone();
@@ -901,13 +921,12 @@ pub fn escape_theme(state: &mut AppState) {
             picker.save_target = target;
         }
         state.theme = theme_from_palette(palette);
-        state.modal = Some(Modal::ThemePicker);
         return;
     }
-    close_theme(state, true);
+    close_settings(state, true);
 }
 
-pub fn close_theme(state: &mut AppState, revert: bool) {
+pub fn close_settings(state: &mut AppState, revert: bool) {
     if revert {
         if state.theme_picker.is_some() {
             let palette = state
@@ -917,39 +936,35 @@ pub fn close_theme(state: &mut AppState, revert: bool) {
             if let Some(palette) = palette {
                 state.theme = theme_from_palette(palette);
             }
-        } else {
-            let palette = if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-                editor.revert();
-                Some(editor.palette.clone())
-            } else {
-                None
-            };
-            if let Some(palette) = palette {
-                state.theme = theme_from_palette(palette);
-            }
+        } else if let Some(editor) = state.theme_editor.as_mut() {
+            editor.revert();
+            let palette = editor.palette.clone();
+            state.theme = theme_from_palette(palette);
         }
     }
     state.theme_picker = None;
-    state.modal = None;
-}
-
-pub fn theme_editor_select(state: &mut AppState, selected: usize) {
-    if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-        editor.select(selected);
-    }
+    state.theme_editor = None;
+    state.show_settings = false;
+    state.settings_nav = 0;
+    state.help_scroll = 0;
+    state.help_scroll_max = 0;
+    state.settings_follow = false;
 }
 
 pub fn save_theme_editor(state: &mut AppState) -> Result<()> {
     let Some((palette, target)) = pending_theme_save(state) else {
         return Ok(());
     };
-    state.theme = theme_from_palette(palette);
+    state.theme = theme_from_palette(palette.clone());
     let local_path = local_theme_path(&state.project_root);
-    let path = save_theme(
-        &state.theme,
+    let fields = theme_save_fields(state);
+    let path = ldnddev_theme::save_theme(
+        &palette,
         &state.project_root,
+        THEME_FILE_NAME,
         target,
         default_config_home().as_deref(),
+        &fields,
     )?;
     let source = match target {
         ThemeSaveTarget::Local => ThemeSource::Local,
@@ -973,20 +988,31 @@ pub fn save_theme_editor(state: &mut AppState) -> Result<()> {
             format!("Saved {} theme to {}", target.label(), path.display()),
         );
     }
-    state.theme_picker = None;
-    state.modal = None;
+    close_settings(state, false);
     Ok(())
 }
 
 fn pending_theme_save(state: &AppState) -> Option<(ldnddev_theme::Palette, ThemeSaveTarget)> {
-    match &state.modal {
-        Some(Modal::ThemeEditor(editor)) => Some((editor.palette.clone(), editor.save_target)),
-        Some(Modal::ThemePicker) => state
-            .theme_picker
-            .as_ref()
-            .map(|picker| (picker.palette.clone(), picker.save_target)),
-        _ => None,
+    if let Some(editor) = state.theme_editor.as_ref() {
+        return Some((editor.palette.clone(), editor.save_target));
     }
+    state
+        .theme_picker
+        .as_ref()
+        .map(|picker| (picker.palette.clone(), picker.save_target))
+}
+
+fn theme_save_fields(state: &AppState) -> Vec<ldnddev_theme::ColorField> {
+    if let Some(editor) = state.theme_editor.as_ref() {
+        return editor.fields.clone();
+    }
+    let mut fields = COLOR_FIELDS.to_vec();
+    for extra in extra_theme_fields() {
+        if !fields.iter().any(|field| field.key == extra.key) {
+            fields.push(*extra);
+        }
+    }
+    fields
 }
 
 #[cfg(test)]

@@ -215,6 +215,8 @@ pub struct Theme {
     pub header_quotes: Vec<String>,
     pub omarchy: Option<OmarchyChoice>,
     pub overrides: BTreeSet<String>,
+    /// Section titles inside Settings. Defaults to `border_active`.
+    pub modal_header: Color,
     pub app_shell: Style,
     pub body: Style,
     pub modal: Style,
@@ -254,6 +256,7 @@ impl Theme {
             header_quotes: vec![],
             omarchy: None,
             overrides: BTreeSet::new(),
+            modal_header: colors.border_active,
             app_shell: Style::default()
                 .fg(colors.text_primary)
                 .bg(colors.base_background),
@@ -377,6 +380,7 @@ pub fn nudge_channel(color: Color, channel: usize, delta: i16) -> Color {
 }
 
 pub fn theme_from_palette(palette: Palette) -> Theme {
+    let modal_header = palette.get("modal_header");
     let mut theme = Theme::from_colors(
         ThemeColors::from_palette(&palette),
         palette.source,
@@ -392,7 +396,14 @@ pub fn theme_from_palette(palette: Palette) -> Theme {
     };
     theme.omarchy = palette.omarchy;
     theme.overrides = palette.overrides;
+    if let Some(rgb) = modal_header {
+        theme.modal_header = color_from_rgb(rgb);
+    }
     theme
+}
+
+pub fn extra_theme_fields() -> &'static [ColorField] {
+    &[ldnddev_theme::EXTRA_MODAL_HEADER]
 }
 
 pub fn palette_from_theme(theme: &Theme) -> Palette {
