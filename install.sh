@@ -71,7 +71,7 @@ Environment:
   PREFIX=/path             Install into PREFIX/bin when BINDIR is not set.
   XDG_CONFIG_HOME=/path    Install the theme under XDG_CONFIG_HOME/ldnddev.
   XDG_DATA_HOME=/path      Install the launcher under XDG_DATA_HOME/applications.
-  VERSION / --tag          Release tag to download (v1.6.7 or 1.6.7).
+  VERSION / --tag          Release tag to download (v1.6.8 or 1.6.8).
   REPO=owner/name          GitHub repo used for downloads and clones.
   GITHUB_TOKEN=...         Optional; raises GitHub API rate limits.
   TARGET=triple            Override the detected package target.
@@ -87,7 +87,7 @@ Defaults:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --uninstall
-  curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --tag v1.6.7
+  curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --tag v1.6.8
   PREFIX=/usr/local ./install.sh
   BINDIR=/opt/bin ./install.sh --from-release
 USAGE

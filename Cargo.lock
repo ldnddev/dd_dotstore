@@ -1427,7 +1427,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "dd_dotstore"
-version = "1.6.7"
+version = "1.6.8"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -1439,7 +1439,7 @@ dependencies = [
 
 [[package]]
 name = "dd_dotstore_gui"
-version = "1.6.7"
+version = "1.6.8"
 dependencies = [
  "dd_dotstore",
  "gpui-component",
