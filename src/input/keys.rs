@@ -1039,3 +1039,105 @@ fn map_editor_key(key: KeyEvent) -> Option<EditorKey> {
 pub(crate) fn selected_rel_path(state: &AppState, node_idx: usize) -> Option<PathBuf> {
     state.nodes.get(node_idx).map(|node| node.path.clone())
 }
+
+/// Window token (`f1`, `ctrl-s`, `shift-a`, `space`) into the terminal key path.
+/// Shift on a letter becomes the uppercase character with no Shift modifier,
+/// which is how the terminal match arms see `A`, `M`, and `G`.
+pub fn handle_token(state: &mut AppState, token: &str) -> Result<bool> {
+    let Some(event) = token_to_key(token) else {
+        return Ok(false);
+    };
+    handle_key(state, event)
+}
+
+fn token_to_key(token: &str) -> Option<KeyEvent> {
+    let token = token.trim().to_ascii_lowercase();
+    if token.is_empty() {
+        return None;
+    }
+    let mut parts: Vec<&str> = token.split('-').collect();
+    let key = parts.pop()?;
+    if key.is_empty() {
+        return None;
+    }
+    let mut control = false;
+    let mut alt = false;
+    let mut shift = false;
+    for part in parts {
+        match part {
+            "ctrl" => control = true,
+            "alt" => alt = true,
+            "shift" => shift = true,
+            _ => return None,
+        }
+    }
+    let code = match key {
+        "up" => KeyCode::Up,
+        "down" => KeyCode::Down,
+        "left" => KeyCode::Left,
+        "right" => KeyCode::Right,
+        "enter" => KeyCode::Enter,
+        "escape" | "esc" => KeyCode::Esc,
+        "backspace" => KeyCode::Backspace,
+        "delete" => KeyCode::Delete,
+        "tab" => KeyCode::Tab,
+        "space" => KeyCode::Char(' '),
+        "pageup" => KeyCode::PageUp,
+        "pagedown" => KeyCode::PageDown,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
+        "f1" => KeyCode::F(1),
+        "f2" => KeyCode::F(2),
+        "f3" => KeyCode::F(3),
+        other => {
+            let mut chars = other.chars();
+            let ch = chars.next()?;
+            if chars.next().is_some() {
+                return None;
+            }
+            let ch = if shift { ch.to_ascii_uppercase() } else { ch };
+            KeyCode::Char(ch)
+        }
+    };
+    let mut modifiers = KeyModifiers::empty();
+    if control {
+        modifiers |= KeyModifiers::CONTROL;
+    }
+    if alt {
+        modifiers |= KeyModifiers::ALT;
+    }
+    Some(KeyEvent::new(code, modifiers))
+}
+
+#[cfg(test)]
+mod token_tests {
+    use super::handle_token;
+    use crate::app::App;
+    use crate::domain::ActionMode;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn token_selects_and_toggles_mode_without_quitting() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("dd_dotstore_token_{nanos}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join(".bashrc"), "export A=1\n").unwrap();
+        let mut app = App::new_with_root(&root).unwrap();
+
+        assert!(!handle_token(&mut app.state, "q").unwrap());
+        assert!(!app.state.nodes[0].selected);
+        assert!(!handle_token(&mut app.state, "space").unwrap());
+        assert!(app.state.nodes[0].selected);
+        assert_eq!(app.state.nodes[0].action_mode, ActionMode::Symlink);
+        handle_token(&mut app.state, "m").unwrap();
+        assert_eq!(app.state.nodes[0].action_mode, ActionMode::Copy);
+        handle_token(&mut app.state, "shift-m").unwrap();
+        assert_eq!(app.state.nodes[0].action_mode, ActionMode::Symlink);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+}
