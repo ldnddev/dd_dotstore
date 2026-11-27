@@ -1,5 +1,6 @@
 //! GPUI window for dd_dotstore. The terminal binary stays the default build.
 
+mod present;
 mod settings;
 mod shell;
 mod windows;

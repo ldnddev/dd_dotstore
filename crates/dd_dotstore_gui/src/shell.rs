@@ -2,10 +2,12 @@
 //! This crate does not import ratatui or crossterm.
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use dd_dotstore::app::App;
 use dd_dotstore::commands::{self, Command, InputMode, Surface};
-use dd_dotstore::domain::{Node, NodeKind};
+use dd_dotstore::domain::{Modal, NodeKind};
+use dd_dotstore::tree::{self, flatten_visible};
 use gpui::{
     ClickEvent, Context, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, KeyDownEvent,
     ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled, Window, div,
@@ -16,6 +18,7 @@ use ldnddev_theme::{
     ThemeSaveTarget,
 };
 
+use crate::present::{self, ModalView};
 #[cfg(test)]
 use crate::settings::Density;
 use crate::settings::{self, GuiSettings};
@@ -76,7 +79,7 @@ impl ShellOptions {
 }
 
 pub struct Shell {
-    app: Option<App>,
+    pub(crate) app: Option<App>,
     load_error: Option<String>,
     settings: GuiSettings,
     settings_file: PathBuf,
@@ -86,7 +89,11 @@ pub struct Shell {
     notice: Option<String>,
     focus: FocusHandle,
     tree_scroll: ScrollHandle,
+    dest_scroll: ScrollHandle,
     settings_scroll: ScrollHandle,
+    /// Saved source path last scrolled into Destinations.
+    dest_follow: Option<PathBuf>,
+    last_poll: Instant,
     quit_runtime: bool,
     pub quit: bool,
 }
@@ -115,7 +122,10 @@ impl Shell {
             notice: None,
             focus: cx.focus_handle(),
             tree_scroll: ScrollHandle::new(),
+            dest_scroll: ScrollHandle::new(),
             settings_scroll: ScrollHandle::new(),
+            dest_follow: None,
+            last_poll: Instant::now(),
             quit_runtime: options.quit_runtime,
             quit: false,
         }
@@ -125,28 +135,54 @@ impl Shell {
         let key = key.to_ascii_lowercase();
         if self.command(&key) == Some(Command::Quit) {
             self.quit = true;
+            self.sync_view();
+            return;
+        }
+        // A dialog stays above Settings, matching the terminal. F1 and F3 still open the sheet.
+        if self.modal_open() {
+            if self.command(&key) == Some(Command::Settings) {
+                self.toggle_sheet(Page::Themes);
+            } else if self.command(&key) == Some(Command::About) {
+                self.show_about();
+            } else {
+                self.forward(&key);
+            }
+            self.sync_view();
             return;
         }
         if self.sheet.is_some() {
             self.sheet_key(&key);
+            self.sync_view();
             return;
         }
         if self.command(&key) == Some(Command::Settings) {
             self.open_sheet(Page::Themes);
+            self.sync_view();
             return;
         }
         if self.command(&key) == Some(Command::About) {
             self.open_sheet(Page::About);
+            self.sync_view();
             return;
         }
         if self.filter_on {
             self.filter_key(&key);
+            self.sync_view();
             return;
         }
         self.tree_key(&key);
+        self.sync_view();
     }
 
     pub fn paste(&mut self, raw: &str) {
+        if self.modal_open() && !self.editing_hex() {
+            if let Some(app) = self.app.as_mut() {
+                if let Err(err) = app.paste_text(raw) {
+                    self.notice = Some(format!("{err:#}"));
+                }
+            }
+            return;
+        }
         let graphic: String = raw
             .chars()
             .filter(|ch| ch.is_ascii_graphic() || *ch == ' ')
@@ -174,12 +210,23 @@ impl Shell {
     pub fn lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
         lines.push("dd_dotstore".to_string());
+        lines.push(format!("quote:{}", self.header_quote()));
         lines.push(format!("density:{}", density_token(self.settings.density)));
+        lines.push(self.focus_dump());
         if let Some(err) = &self.load_error {
             lines.push(err.clone());
         }
         lines.push(format!("filter:{}", self.filter_text()));
         lines.extend(self.tree_lines());
+        let dests = self.destination_lines();
+        lines.push(format!("destinations:{}", dests.len()));
+        lines.extend(dests);
+        if let Some(toast) = self.toast_dump() {
+            lines.push(toast);
+        }
+        if let Some(view) = self.modal_dump() {
+            lines.extend(present::modal_dump(&view));
+        }
         lines.push(self.footer_line().to_string());
         if let Some(notice) = &self.notice {
             lines.push(notice.clone());
@@ -231,10 +278,10 @@ impl Shell {
     }
 
     fn footer_line(&self) -> &'static str {
-        if self.sheet.is_some() {
+        if self.sheet.is_some() || self.modal_open() {
             "F1: Settings  Esc: Close  Ctrl+Q: Quit"
         } else {
-            "F1: Settings  Ctrl+Q: Quit"
+            "F1: Settings  j/k: Move  Space: Select  s: Apply  /: Filter  Ctrl+Q: Quit"
         }
     }
 
@@ -245,6 +292,29 @@ impl Shell {
             .unwrap_or_default()
     }
 
+    fn source_paints(&self) -> Vec<SourcePaint> {
+        let Some(app) = &self.app else {
+            return Vec::new();
+        };
+        let selected = app.state.list_state.selected();
+        app.state
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let mut line = present::source_line(node, selected == Some(index));
+                line.push_str(&present::suggestion_suffix(&app.state, node));
+                SourcePaint {
+                    line,
+                    check: if node.selected { "[✓]" } else { "[ ]" },
+                    folder: present::row_has_children(node),
+                    expanded: present::folder_expanded(node),
+                }
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
     fn tree_lines(&self) -> Vec<String> {
         let Some(app) = &self.app else {
             return Vec::new();
@@ -254,8 +324,56 @@ impl Shell {
             .nodes
             .iter()
             .enumerate()
-            .map(|(index, node)| tree_line(app, node, selected == Some(index)))
+            .map(|(index, node)| {
+                let mut line = present::source_line(node, selected == Some(index));
+                line.push_str(&present::suggestion_suffix(&app.state, node));
+                line
+            })
             .collect()
+    }
+
+    fn destination_lines(&self) -> Vec<String> {
+        self.app
+            .as_ref()
+            .map(|app| {
+                present::saved_destinations(&app.state)
+                    .into_iter()
+                    .map(|(line, _)| line)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn focus_dump(&self) -> String {
+        self.app
+            .as_ref()
+            .map(|app| present::focus_line(&app.state))
+            .unwrap_or_else(|| "focus:".to_string())
+    }
+
+    fn header_quote(&self) -> String {
+        self.app
+            .as_ref()
+            .map(|app| app.state.header_copy.clone())
+            .unwrap_or_default()
+    }
+
+    fn toast_dump(&self) -> Option<String> {
+        self.app
+            .as_ref()
+            .and_then(|app| app.state.toast.as_ref().map(present::toast_line))
+    }
+
+    fn modal_dump(&self) -> Option<ModalView> {
+        self.app
+            .as_ref()
+            .and_then(|app| present::modal_view(&app.state))
+    }
+
+    fn modal_open(&self) -> bool {
+        self.app
+            .as_ref()
+            .is_some_and(|app| app.state.modal.is_some())
     }
 
     fn page_label(&self, sheet: &Sheet) -> String {
@@ -902,16 +1020,228 @@ impl Shell {
 
     fn tree_key(&mut self, key: &str) {
         let vim = self.settings.vim_keys;
+        let command = matches!(
+            key,
+            "up" | "down"
+                | "left"
+                | "right"
+                | "space"
+                | "enter"
+                | "e"
+                | "m"
+                | "shift-m"
+                | "s"
+                | "p"
+                | "x"
+                | "u"
+                | "r"
+                | "i"
+                | "shift-i"
+                | "shift-e"
+                | "t"
+                | "shift-t"
+                | "shift-a"
+                | "shift-d"
+                | "ctrl-g"
+                | "pageup"
+                | "pagedown"
+        );
+        let vim_motion = vim && matches!(key, "j" | "k" | "h" | "l" | "g" | "shift-g");
         match key {
-            "up" => self.move_tree(-1),
-            "down" => self.move_tree(1),
-            "k" if vim => self.move_tree(-1),
-            "j" if vim => self.move_tree(1),
-            "g" if vim => self.move_tree_edge(true),
-            "shift-g" if vim => self.move_tree_edge(false),
             "/" => self.begin_filter(),
-            "escape" => self.clear_filter(),
+            "escape" => {
+                if self.filter_text().is_empty() {
+                    self.forward("escape");
+                } else {
+                    self.clear_filter();
+                }
+            }
+            _ if command || vim_motion => self.forward(key),
             _ => {}
+        }
+    }
+
+    fn forward(&mut self, key: &str) {
+        let Some(app) = self.app.as_mut() else {
+            return;
+        };
+        match dd_dotstore::input::handle_token(&mut app.state, key) {
+            Ok(true) => self.quit = true,
+            Ok(false) => {}
+            Err(err) => self.notice = Some(format!("{err:#}")),
+        }
+    }
+
+    fn toggle_sheet(&mut self, page: Page) {
+        if self.sheet.is_some() {
+            self.close_sheet(true);
+        } else {
+            self.open_sheet(page);
+        }
+    }
+
+    fn show_about(&mut self) {
+        if self.sheet.is_none() {
+            self.open_sheet(Page::About);
+            return;
+        }
+        if let Some(sheet) = self.sheet.as_mut() {
+            sheet.page = Page::About;
+            sheet.row = 0;
+            sheet.query.clear();
+            sheet.query_on = false;
+        }
+    }
+
+    fn sync_view(&mut self) {
+        let Some(app) = self.app.as_ref() else {
+            return;
+        };
+        if let Some(index) = app.state.list_state.selected() {
+            self.tree_scroll.scroll_to_item(index);
+        }
+        let saved = app
+            .state
+            .list_state
+            .selected()
+            .and_then(|index| app.state.nodes.get(index))
+            .filter(|node| node.assigned_dest().is_some())
+            .map(|node| node.path.clone());
+        if saved == self.dest_follow {
+            return;
+        }
+        self.dest_follow = saved.clone();
+        if let Some(path) = saved {
+            if let Some(index) = present::saved_destinations(&app.state)
+                .iter()
+                .position(|(_, source)| source == &path)
+            {
+                self.dest_scroll.scroll_to_item(index);
+            }
+        }
+    }
+
+    /// Highlight a source row. Shift checks the range. A double-click opens the browser.
+    pub fn click_source(&mut self, index: usize, shift: bool, clicks: usize) {
+        let open_browser = {
+            let Some(app) = self.app.as_mut() else {
+                return;
+            };
+            if index >= app.state.nodes.len() {
+                return;
+            }
+            let prev = app.state.list_state.selected();
+            app.state.list_state.select(Some(index));
+            if shift {
+                if let Some(cur) = prev {
+                    let start = cur.min(index);
+                    let end = cur.max(index);
+                    for row in start..=end {
+                        if let Some(node) = app.state.nodes.get(row) {
+                            let path = node.path.clone();
+                            if let Some(node) = tree::find_mut_node(&mut app.state.tree, &path) {
+                                node.selected = true;
+                            }
+                        }
+                    }
+                    flatten_visible(&mut app.state);
+                    let last = app.state.nodes.len().saturating_sub(1);
+                    app.state.list_state.select(Some(index.min(last)));
+                }
+                false
+            } else {
+                clicks >= 2
+            }
+        };
+        if open_browser {
+            self.forward("e");
+        }
+        self.sync_view();
+    }
+
+    pub fn click_checkbox(&mut self, index: usize) {
+        self.click_source(index, false, 1);
+        self.forward("space");
+        self.sync_view();
+    }
+
+    pub fn click_twist(&mut self, index: usize) {
+        {
+            let Some(app) = self.app.as_mut() else {
+                return;
+            };
+            let Some(path) = app.state.nodes.get(index).map(|node| node.path.clone()) else {
+                return;
+            };
+            if !matches!(
+                app.state.nodes.get(index).map(|node| &node.kind),
+                Some(NodeKind::Folder { .. })
+            ) {
+                return;
+            }
+            tree::toggle_expand(&mut app.state, &path);
+            flatten_visible(&mut app.state);
+            let last = app.state.nodes.len().saturating_sub(1);
+            app.state.list_state.select(Some(index.min(last)));
+        }
+        self.sync_view();
+    }
+
+    pub fn click_destination(&mut self, index: usize) {
+        {
+            let Some(app) = self.app.as_mut() else {
+                return;
+            };
+            let Some(path) = present::saved_destinations(&app.state)
+                .get(index)
+                .map(|(_, path)| path.clone())
+            else {
+                return;
+            };
+            tree::expand_ancestors(&mut app.state, &path);
+            flatten_visible(&mut app.state);
+            if let Some(row) = app.state.nodes.iter().position(|node| node.path == path) {
+                app.state.list_state.select(Some(row));
+            }
+        }
+        self.sync_view();
+    }
+
+    pub fn click_modal_row(&mut self, index: usize, clicks: usize) {
+        let confirm = {
+            let Some(app) = self.app.as_mut() else {
+                return;
+            };
+            match &mut app.state.modal {
+                Some(Modal::EditDest { browser, .. }) => browser.selected = index,
+                Some(Modal::IgnoreEditor { selected, .. }) => *selected = index,
+                Some(Modal::ImportPicker { selected, .. }) => *selected = index,
+                Some(Modal::Adopt { selected, .. }) => *selected = index,
+                Some(Modal::Doctor {
+                    selected, scroll, ..
+                }) => {
+                    *selected = index;
+                    if index < *scroll {
+                        *scroll = index;
+                    }
+                }
+                _ => return,
+            }
+            clicks >= 2
+        };
+        if confirm {
+            self.forward("enter");
+        }
+        self.sync_view();
+    }
+
+    fn poll(&mut self) {
+        if self.last_poll.elapsed() < Duration::from_millis(200) {
+            return;
+        }
+        self.last_poll = Instant::now();
+        if let Some(app) = self.app.as_mut() {
+            app.tick();
         }
     }
 
@@ -1009,32 +1339,6 @@ impl Shell {
         dd_dotstore::tree::flatten_visible(&mut app.state);
     }
 
-    fn move_tree(&mut self, delta: isize) {
-        let Some(app) = self.app.as_mut() else {
-            return;
-        };
-        let len = app.state.nodes.len() as isize;
-        if len == 0 {
-            return;
-        }
-        let current = app.state.list_state.selected().unwrap_or(0) as isize;
-        let next = (current + delta).clamp(0, len - 1) as usize;
-        app.state.list_state.select(Some(next));
-        self.tree_scroll.scroll_to_item(next);
-    }
-
-    fn move_tree_edge(&mut self, start: bool) {
-        let Some(app) = self.app.as_mut() else {
-            return;
-        };
-        if app.state.nodes.is_empty() {
-            return;
-        }
-        let next = if start { 0 } else { app.state.nodes.len() - 1 };
-        app.state.list_state.select(Some(next));
-        self.tree_scroll.scroll_to_item(next);
-    }
-
     fn choose_theme(&mut self, index: usize) {
         if self
             .sheet
@@ -1053,14 +1357,6 @@ impl Shell {
             .map(|sheet| sheet.picker.preview_selected());
         if let Some(preview) = preview {
             self.finish_picker(preview);
-        }
-    }
-
-    fn choose_tree(&mut self, index: usize) {
-        if let Some(app) = self.app.as_mut() {
-            if index < app.state.nodes.len() {
-                app.state.list_state.select(Some(index));
-            }
         }
     }
 
@@ -1093,16 +1389,27 @@ impl Render for Shell {
         if self.quit && self.quit_runtime {
             cx.quit();
         }
+        self.poll();
         let paint = paint_colors(self.app.as_ref());
         let footer = self.footer_line().to_string();
         let filter = self.filter_field_label();
-        let rows = self.tree_lines();
+        let quote = self.header_quote();
+        let focus = self
+            .focus_dump()
+            .trim_start_matches("focus:")
+            .trim()
+            .to_string();
         let selected = self
             .app
             .as_ref()
             .and_then(|app| app.state.list_state.selected());
         let row_h = self.settings.density.row_h();
-        let sheet = self.sheet_view(cx, &paint);
+        let source_rows = self.source_paints();
+        let dest_rows = self.destination_lines();
+        let sheet = self.sheet_view(cx, &paint, row_h);
+        let modal = self.modal_layer(cx, &paint, row_h);
+        let toast = self.toast_layer(&paint, row_h);
+
         let mut tree = div()
             .id("tree-scroll")
             .track_scroll(&self.tree_scroll)
@@ -1111,7 +1418,7 @@ impl Render for Shell {
             .overflow_y_scroll()
             .flex()
             .flex_col();
-        for (index, line) in rows.into_iter().enumerate() {
+        for (index, row) in source_rows.into_iter().enumerate() {
             let on = selected == Some(index);
             tree = tree.child(
                 div()
@@ -1120,17 +1427,73 @@ impl Render for Shell {
                     .px(px(8.0))
                     .flex()
                     .items_center()
+                    .gap(px(6.0))
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .when(on, |row| row.bg(paint.selected).text_color(paint.accent))
+                    .on_click(cx.listener(move |shell, event: &ClickEvent, _, cx| {
+                        shell.click_source(index, event.modifiers().shift, event.click_count());
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .id(("tree-check", index))
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+                                shell.click_checkbox(index);
+                                cx.stop_propagation();
+                                cx.notify();
+                            }))
+                            .child(row.check),
+                    )
+                    .child(
+                        div()
+                            .id(("tree-twist", index))
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+                                shell.click_twist(index);
+                                cx.stop_propagation();
+                                cx.notify();
+                            }))
+                            .child(if row.folder {
+                                if row.expanded { "▾" } else { "▸" }
+                            } else {
+                                " "
+                            }),
+                    )
+                    .child(row.line),
+            );
+        }
+
+        let mut dest = div()
+            .id("dest-scroll")
+            .track_scroll(&self.dest_scroll)
+            .absolute()
+            .size_full()
+            .overflow_y_scroll()
+            .flex()
+            .flex_col();
+        for (index, line) in dest_rows.iter().cloned().enumerate() {
+            dest = dest.child(
+                div()
+                    .id(("dest-row", index))
+                    .h(px(row_h))
+                    .px(px(8.0))
+                    .flex()
+                    .items_center()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .cursor_pointer()
                     .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
-                        shell.choose_tree(index);
+                        shell.click_destination(index);
                         cx.stop_propagation();
                         cx.notify();
                     }))
                     .child(line),
             );
         }
+        let dest_title = format!("Destinations ({})", dest_rows.len());
 
         div()
             .id("shell")
@@ -1146,27 +1509,48 @@ impl Render for Shell {
             .bg(paint.base)
             .text_color(paint.text)
             .text_size(px(13.0))
-            .child(band("dd_dotstore", &paint, true))
+            .child(band(&format!("dd_dotstore   {quote}"), &paint, true, row_h))
+            .child(band(&focus, &paint, true, row_h))
             .child(
                 div()
                     .flex_1()
                     .min_h(px(0.0))
-                    .relative()
                     .flex()
-                    .flex_col()
+                    .flex_row()
+                    .overflow_hidden()
                     .bg(paint.panel)
-                    .child(filter_row(cx, &filter, self.filter_on, &paint))
-                    .children(self.load_error.as_ref().map(|err| {
+                    .child(
                         div()
-                            .px(px(8.0))
-                            .py(px(4.0))
-                            .text_color(paint.text)
-                            .child(err.clone())
-                    }))
-                    .child(div().flex_1().min_h(px(0.0)).relative().child(tree)),
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .border_r_1()
+                            .border_color(paint.border)
+                            .child(filter_row(cx, &filter, self.filter_on, &paint, row_h))
+                            .children(self.load_error.as_ref().map(|err| {
+                                div()
+                                    .px(px(8.0))
+                                    .py(px(4.0))
+                                    .text_color(paint.text)
+                                    .child(err.clone())
+                            }))
+                            .child(div().flex_1().min_h(px(0.0)).relative().child(tree)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .child(band(&dest_title, &paint, true, row_h))
+                            .child(div().flex_1().min_h(px(0.0)).relative().child(dest)),
+                    ),
             )
-            .child(band(&footer, &paint, false))
+            .child(band(&footer, &paint, false, row_h))
             .children(sheet)
+            .children(modal)
+            .children(toast)
     }
 }
 
@@ -1193,6 +1577,7 @@ impl Shell {
         &self,
         cx: &mut Context<Self>,
         paint: &Paint,
+        row_h: f32,
     ) -> Option<gpui::Stateful<gpui::Div>> {
         let sheet = self.sheet.as_ref()?;
         let page = self.page_label(sheet);
@@ -1274,9 +1659,9 @@ impl Shell {
             .id("settings-panel")
             .occlude()
             .absolute()
-            .top(px(CHROME))
+            .top(px(row_h * 2.0))
             .right(px(0.0))
-            .bottom(px(CHROME))
+            .bottom(px(row_h))
             .w(relative(0.7))
             .flex()
             .flex_col()
@@ -1568,16 +1953,161 @@ impl Shell {
         }
         "j/k move    Enter    / search    Tab section    Esc close".to_string()
     }
+
+    fn modal_layer(
+        &self,
+        cx: &mut Context<Self>,
+        paint: &Paint,
+        row_h: f32,
+    ) -> Option<gpui::Stateful<gpui::Div>> {
+        let view = self.modal_dump()?;
+        let mut body = div()
+            .id("modal-body")
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.0));
+        for (index, row) in view.rows.iter().enumerate() {
+            let mark = if row.selected { ">" } else { " " };
+            let label = format!("{mark} {}", row.label);
+            let clickable = row.index;
+            body = body.child(
+                div()
+                    .id(("modal-row", index))
+                    .h(px(row_h))
+                    .px(px(8.0))
+                    .flex()
+                    .items_center()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .when(row.selected, |row| row.bg(paint.selected))
+                    .when(clickable.is_some(), |row| {
+                        row.cursor_pointer().on_click(cx.listener(
+                            move |shell, event: &ClickEvent, _, cx| {
+                                if let Some(index) = clickable {
+                                    shell.click_modal_row(index, event.click_count());
+                                }
+                                cx.stop_propagation();
+                                cx.notify();
+                            },
+                        ))
+                    })
+                    .child(label),
+            );
+        }
+        let kind = view.kind;
+        Some(
+            div()
+                .id("modal-scrim")
+                .absolute()
+                .top(px(row_h * 2.0))
+                .left(px(0.0))
+                .right(px(0.0))
+                .bottom(px(row_h))
+                .on_click(cx.listener(|shell, _: &ClickEvent, _, cx| {
+                    shell.forward("escape");
+                    cx.stop_propagation();
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .id("modal")
+                        .absolute()
+                        .top(px(24.0))
+                        .left(relative(0.15))
+                        .w(relative(0.7))
+                        .max_h(relative(0.85))
+                        .flex()
+                        .flex_col()
+                        .overflow_hidden()
+                        .bg(paint.raised)
+                        .border_1()
+                        .border_color(paint.border)
+                        .occlude()
+                        .on_click(cx.listener(|_shell, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                        }))
+                        .child(
+                            div()
+                                .h(px(row_h))
+                                .px(px(8.0))
+                                .flex()
+                                .items_center()
+                                .font_weight(FontWeight::BOLD)
+                                .border_b_1()
+                                .border_color(paint.border)
+                                .child(view.title.clone()),
+                        )
+                        .child(body)
+                        .child(
+                            div()
+                                .h(px(row_h))
+                                .px(px(8.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(12.0))
+                                .border_t_1()
+                                .border_color(paint.border)
+                                .text_color(paint.secondary)
+                                .child(view.hint.clone())
+                                .when(matches!(kind, "plan" | "overwrite" | "adopt"), |row| {
+                                    row.child(
+                                        div()
+                                            .id("modal-apply")
+                                            .cursor_pointer()
+                                            .text_color(paint.text)
+                                            .on_click(cx.listener(
+                                                |shell, _: &ClickEvent, _, cx| {
+                                                    shell.forward("y");
+                                                    cx.stop_propagation();
+                                                    cx.notify();
+                                                },
+                                            ))
+                                            .child("Apply"),
+                                    )
+                                })
+                                .child(
+                                    div()
+                                        .id("modal-cancel")
+                                        .cursor_pointer()
+                                        .text_color(paint.text)
+                                        .on_click(cx.listener(|shell, _: &ClickEvent, _, cx| {
+                                            shell.forward("escape");
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }))
+                                        .child("Cancel"),
+                                ),
+                        ),
+                ),
+        )
+    }
+
+    fn toast_layer(&self, paint: &Paint, row_h: f32) -> Option<gpui::Div> {
+        let line = self.toast_dump()?;
+        Some(
+            div()
+                .absolute()
+                .bottom(px(row_h + 8.0))
+                .right(px(12.0))
+                .max_w(relative(0.6))
+                .px(px(8.0))
+                .py(px(4.0))
+                .bg(paint.raised)
+                .border_1()
+                .border_color(paint.border)
+                .text_color(paint.text)
+                .child(line),
+        )
+    }
 }
 
-fn tree_line(app: &App, node: &Node, selected: bool) -> String {
-    let mark = if selected { ">" } else { " " };
-    let kind = match node.kind {
-        NodeKind::Folder { .. } => "folder",
-        NodeKind::File { .. } => "file",
-    };
-    let dest = dd_dotstore::actions::planned_dest(&app.state, node);
-    format!("{mark} {} {kind} {}", node.name, dest.display())
+struct SourcePaint {
+    line: String,
+    check: &'static str,
+    folder: bool,
+    expanded: bool,
 }
 
 fn theme_row_label(row: &PickerRow) -> String {
@@ -1711,9 +2241,9 @@ fn paint_colors(app: Option<&App>) -> Paint {
     }
 }
 
-fn band(text: &str, paint: &Paint, top: bool) -> gpui::Div {
+fn band(text: &str, paint: &Paint, top: bool, height: f32) -> gpui::Div {
     div()
-        .h(px(CHROME))
+        .h(px(height))
         .px(px(8.0))
         .flex()
         .items_center()
@@ -1731,10 +2261,11 @@ fn filter_row(
     label: &str,
     on: bool,
     paint: &Paint,
+    height: f32,
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id("tree-filter")
-        .h(px(CHROME))
+        .h(px(height))
         .px(px(8.0))
         .flex()
         .items_center()
